@@ -84,16 +84,22 @@ describe('large dataset generator', () => {
   });
 });
 
+interface PlanNode {
+  'Node Type': string;
+  'Relation Name'?: string;
+  'Index Name'?: string;
+  Plans?: PlanNode[];
+}
+
+const flatten = (node: PlanNode): PlanNode[] => [node, ...(node.Plans ?? []).flatMap(flatten)];
+
+/** All nodes of the plan PostgreSQL chooses for a query. */
+async function planNodes(sql: string, params: unknown[]): Promise<PlanNode[]> {
+  const { rows } = await client.query(`EXPLAIN (FORMAT JSON) ${sql}`, params);
+  return flatten(rows[0]['QUERY PLAN'][0].Plan);
+}
+
 describe('orders_customer_id_idx', () => {
-  interface PlanNode {
-    'Node Type': string;
-    'Relation Name'?: string;
-    'Index Name'?: string;
-    Plans?: PlanNode[];
-  }
-
-  const flatten = (node: PlanNode): PlanNode[] => [node, ...(node.Plans ?? []).flatMap(flatten)];
-
   it('is used by the planner to find one customer’s orders', async () => {
     // A generated customer with a typical number of orders.
     const { rows: customers } = await client.query(`
@@ -106,18 +112,36 @@ describe('orders_customer_id_idx', () => {
 
     // The filter and sort of get_customer_orders(). Planner statistics are
     // fresh because the generator ends with ANALYZE.
-    const { rows } = await client.query(
-      `EXPLAIN (FORMAT JSON)
-       SELECT o.order_id FROM orders o
+    const nodes = await planNodes(
+      `SELECT o.order_id FROM orders o
        WHERE o.customer_id = $1
        ORDER BY o.created_at DESC, o.order_id DESC`,
       [customers[0].customer_id],
     );
-    const nodes = flatten(rows[0]['QUERY PLAN'][0].Plan);
 
     expect(nodes.map((n) => n['Index Name'])).toContain('orders_customer_id_idx');
     expect(nodes).not.toContainEqual(
       expect.objectContaining({ 'Node Type': 'Seq Scan', 'Relation Name': 'orders' }),
+    );
+  });
+});
+
+describe('inventory_pkey', () => {
+  it('serves the get_product_availability() lookup without an extra index', async () => {
+    const { rows } = await client.query(
+      "SELECT product_id, warehouse_id FROM inventory WHERE product_id = (SELECT min(product_id) FROM products WHERE sku LIKE 'GEN-%') LIMIT 1",
+    );
+
+    // The lookup of get_product_availability().
+    const nodes = await planNodes(
+      `SELECT i.quantity_on_hand, i.quantity_reserved, i.quantity_available
+       FROM inventory i
+       WHERE i.product_id = $1 AND i.warehouse_id = $2`,
+      [rows[0].product_id, rows[0].warehouse_id],
+    );
+
+    expect(nodes).toContainEqual(
+      expect.objectContaining({ 'Node Type': 'Index Scan', 'Index Name': 'inventory_pkey' }),
     );
   });
 });

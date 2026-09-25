@@ -50,17 +50,33 @@ export function createWarehouse(client: Client, code = `WH${next()}`): Promise<I
   );
 }
 
-export async function createInventory(
+export interface StockLevels {
+  onHand: number;
+  reserved?: number;
+}
+
+/** Adds an inventory row for an existing product and warehouse. */
+export async function stockProduct(
   client: Client,
-  { onHand, reserved = 0 }: { onHand: number; reserved?: number },
-): Promise<{ productId: Id; warehouseId: Id }> {
-  const productId = await createProduct(client);
-  const warehouseId = await createWarehouse(client);
+  productId: Id,
+  warehouseId: Id,
+  { onHand, reserved = 0 }: StockLevels,
+): Promise<void> {
   await client.query(
     `INSERT INTO inventory (product_id, warehouse_id, quantity_on_hand, quantity_reserved)
      VALUES ($1, $2, $3, $4)`,
     [productId, warehouseId, onHand, reserved],
   );
+}
+
+/** Creates a new product and warehouse with the given stock between them. */
+export async function createInventory(
+  client: Client,
+  levels: StockLevels,
+): Promise<{ productId: Id; warehouseId: Id }> {
+  const productId = await createProduct(client);
+  const warehouseId = await createWarehouse(client);
+  await stockProduct(client, productId, warehouseId, levels);
   return { productId, warehouseId };
 }
 
