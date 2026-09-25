@@ -64,6 +64,53 @@ jobs:
       - name: Integration tests
         run: npm test
 
+  api:
+    name: API tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: jaladb
+          POSTGRES_PASSWORD: jaladb_ci
+          POSTGRES_DB: jaladb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U jaladb -d jaladb"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://jaladb:jaladb_ci@localhost:5432/jaladb
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+
+      # The API tests migrate and seed their database with the tooling in the
+      # repository root, so both packages are installed.
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix backend
+
+      - name: Type check
+        run: npm run typecheck --prefix backend
+
+      - name: API integration tests
+        run: npm test --prefix backend
+
   tooling:
     name: Tooling checks
     runs-on: ubuntu-latest
