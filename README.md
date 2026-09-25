@@ -35,38 +35,61 @@ indexes with `EXPLAIN ANALYZE` examples, and a thin Node.js API.
 Prerequisites: Docker with Compose, Node.js 22 or newer.
 
 ```bash
-cp .env.example .env        # local configuration
-docker compose up -d        # start PostgreSQL and Adminer
-npm install
-npm run db:migrate          # create the schema
-npm run db:seed             # load sample data
-npm test                    # run the integration tests
+./dev setup      # create .env, npm install, start containers, migrate, seed
+./dev test       # run the integration tests
 ```
 
-### Commands
+### The `dev` helper
 
-| Command              | Description                                                            |
-| -------------------- | ---------------------------------------------------------------------- |
-| `docker compose up -d` | Start PostgreSQL (`localhost:5432`) and Adminer (`localhost:8080`)   |
-| `docker compose down`  | Stop the containers (add `-v` to delete all data)                    |
-| `npm run db:migrate` | Apply pending migrations                                               |
-| `npm run db:status`  | List applied and pending migrations                                    |
-| `npm run db:seed`    | Replace all data with the sample dataset                               |
-| `npm test`           | Run the database integration tests                                     |
-| `npm run typecheck`  | Type-check the TypeScript tooling and tests                            |
+[`dev`](dev) wraps the common Docker and database tasks. Run `./dev help` for
+the full list.
+
+| Command                  | Description                                                     |
+| ------------------------ | --------------------------------------------------------------- |
+| `./dev up`               | Start PostgreSQL (`localhost:5432`) and Adminer (`localhost:8080`) |
+| `./dev down`             | Stop the containers (data is kept)                              |
+| `./dev restart`          | Restart the containers                                          |
+| `./dev ps`               | Show container status                                           |
+| `./dev logs [service]`   | Follow logs of all services, or of `postgres` / `adminer`       |
+| `./dev psql [args]`      | Open `psql` in the database container                           |
+| `./dev shell`            | Open a shell in the database container                          |
+| `./dev migrate`          | Apply pending migrations                                        |
+| `./dev status`           | List applied and pending migrations                             |
+| `./dev seed`             | Replace all data with the sample dataset                        |
+| `./dev reset [-y]`       | Delete all data, then start, migrate and seed from scratch      |
+| `./dev test`             | Run the database integration tests                              |
+| `./dev adminer`          | Print the Adminer login URL and password                        |
+
+SQL can be passed to `psql` directly or piped in:
+
+```bash
+./dev psql -c 'SELECT sku, name, price FROM products LIMIT 5'
+./dev psql < my_query.sql
+```
+
+### Without the helper
+
+The helper only calls standard commands:
+
+```bash
+cp .env.example .env
+docker compose up -d --wait
+npm install
+npm run db:migrate          # apply pending migrations
+npm run db:status           # list applied and pending migrations
+npm run db:seed             # replace all data with the sample dataset
+npm test                    # run the integration tests
+npm run typecheck           # type-check the TypeScript tooling and tests
+docker compose down         # stop (add -v to delete all data)
+```
 
 ### Browsing the database
 
 Adminer, a lightweight web GUI, runs at
 <http://localhost:8080/?pgsql=postgres&username=jaladb&db=jaladb>. The link
 preselects PostgreSQL and fills in the server, user and database, so only the
-password from `.env` (`jaladb_local` by default) is needed.
-
-For the command line:
-
-```bash
-docker compose exec postgres psql -U jaladb -d jaladb
-```
+password from `.env` (`jaladb_local` by default) is needed. `./dev adminer`
+prints both.
 
 ## Schema
 
@@ -162,6 +185,7 @@ jaladb/
 │   ├── seeds/        # sample data (SQL)
 │   ├── scripts/      # migration and seed runner (TypeScript)
 │   └── tests/        # PostgreSQL integration tests (Vitest)
+├── dev                 # development helper script
 ├── docker-compose.yml
 ├── .env.example
 └── package.json
