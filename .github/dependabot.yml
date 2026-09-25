@@ -1,0 +1,45 @@
+# Dependabot version updates. Security updates for vulnerable dependencies are
+# enabled separately in the repository settings.
+#
+# Minor and patch updates are grouped per ecosystem; major updates arrive as
+# individual PRs. Every PR runs CI and waits for human review.
+
+version: 2
+
+updates:
+  # Database tooling and tests (package.json in the repository root)
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+
+  # Action versions in .github/workflows/
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      actions-minor-and-patch:
+        update-types: [minor, patch]
+
+  # Images in docker-compose.yml
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    ignore:
+      # A PostgreSQL major upgrade (e.g. 18 -> 19) needs a data upgrade of
+      # existing volumes (dump/restore or pg_upgrade), so it is done on
+      # purpose, not by an automatic PR.
+      - dependency-name: postgres
+        update-types: ["version-update:semver-major"]
