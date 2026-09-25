@@ -99,6 +99,8 @@ interface PlanNode {
   'Node Type': string;
   'Relation Name'?: string;
   'Index Name'?: string;
+  Filter?: string;
+  'Index Cond'?: string;
   Plans?: PlanNode[];
 }
 
@@ -183,6 +185,27 @@ describe('orders_created_at_brin_idx', () => {
     } finally {
       await client.query('RESET enable_seqscan');
     }
+  });
+});
+
+describe('product_inventory_summary view', () => {
+  it('applies a SKU filter before aggregating, and reads inventory by index', async () => {
+    const { rows } = await client.query("SELECT min(sku) AS sku FROM products WHERE sku LIKE 'GEN-%'");
+
+    const nodes = await planNodes('SELECT * FROM product_inventory_summary WHERE sku = $1', [rows[0].sku]);
+
+    // The SKU condition must be applied where products are read, not after
+    // summing the inventory of every product. (Whether products is then read
+    // by index or, on this small test table, sequentially is the planner's
+    // cost decision; on the large dataset it uses products_sku_key.)
+    const productScan = nodes.find((n) => n['Relation Name'] === 'products');
+    expect(`${productScan?.Filter ?? ''} ${productScan?.['Index Cond'] ?? ''}`).toContain('sku =');
+
+    // Only the matching product's inventory rows are read, via the primary key.
+    expect(nodes.map((n) => n['Index Name'])).toContain('inventory_pkey');
+    expect(nodes).not.toContainEqual(
+      expect.objectContaining({ 'Node Type': 'Seq Scan', 'Relation Name': 'inventory' }),
+    );
   });
 });
 
