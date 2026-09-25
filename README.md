@@ -18,11 +18,11 @@ Done:
 - Core schema with database-level integrity constraints
 - Deterministic seed data, plus an optional large generated dataset
 - Integration tests against real PostgreSQL, run in CI
-- `get_customer_orders()`, `get_product_availability()`
+- `get_customer_orders()`, `get_product_availability()`, `reserve_stock()`
 - First index optimisation with `EXPLAIN ANALYZE` evidence
   ([docs/query-optimization.md](docs/query-optimization.md))
 
-Planned next: `reserve_stock`, `create_order`, an
+Planned next: `create_order`, an
 order status history trigger, views, `get_best_selling_products`, and a thin
 Node.js API.
 
@@ -191,6 +191,61 @@ SELECT * FROM get_product_availability(5, 1);
 
 Source: [get_product_availability.sql](database/functions/get_product_availability.sql)
 
+### `reserve_stock(product_id BIGINT, warehouse_id BIGINT, quantity INTEGER)`
+
+Reserves stock for an order and returns the quantity still available.
+
+```sql
+SELECT reserve_stock(5, 1, 2);   -- 39 available before, returns 37
+```
+
+- It increases `quantity_reserved`; stock on hand stays unchanged until the
+  goods ship.
+- It runs in the caller's transaction, so a rollback undoes the reservation.
+- **Concurrency:** the inventory row is locked with `SELECT ... FOR UPDATE`
+  before availability is checked. A competing reservation for the same product
+  and warehouse waits until the first transaction commits or rolls back, and
+  then checks against the committed stock. The same units can never be
+  reserved twice.
+- **Safety net:** `CHECK (quantity_reserved <= quantity_on_hand)`. With
+  `FOR UPDATE` removed, the concurrency tests show the constraint still stops
+  over-reservation, but only with a generic `23514` constraint error instead of
+  a clear `JD001`.
+
+Try the lock in two terminals:
+
+```sql
+-- Terminal 1: ./dev psql
+BEGIN;
+SELECT reserve_stock(5, 1, 30);   -- returns 9; the row stays locked
+
+-- Terminal 2: ./dev psql
+SELECT reserve_stock(5, 1, 20);   -- waits...
+
+-- Terminal 1
+COMMIT;                           -- terminal 2 fails: requested 20, available 9
+                                  -- (with ROLLBACK instead, terminal 2 succeeds)
+```
+
+`./dev seed` resets the data afterwards.
+
+Source: [reserve_stock.sql](database/functions/reserve_stock.sql)
+
+### Error codes
+
+The functions raise specific SQLSTATEs, so the API can map errors without
+parsing messages:
+
+| SQLSTATE | Meaning | Raised by | Planned HTTP status |
+| --- | --- | --- | --- |
+| `P0002` `no_data_found` | Customer, product or warehouse does not exist | all functions | 404 |
+| `22023` `invalid_parameter_value` | `NULL` argument, non-positive quantity | all functions | 400 |
+| `JD001` | Insufficient stock (message has requested and available quantities) | `reserve_stock` | 409 |
+| `JD002` | Product or warehouse is inactive | `reserve_stock` | 409 |
+
+`JD` is a project-specific SQLSTATE class, chosen so it can't collide with
+PostgreSQL's own codes.
+
 ## Migrations
 
 `npm run db:migrate` ([database/scripts/migrations.ts](database/scripts/migrations.ts))
@@ -267,6 +322,8 @@ Normal development and the default tests only use the small dataset.
   (which also checks that migrations work on an empty database), and drops it
   after the run.
 - Each test runs inside a transaction that is rolled back, so tests are isolated.
+  The exception is the concurrency tests: other connections can only see
+  committed rows, so they commit their own fixtures and delete them afterwards.
 - Constraint tests check the exact SQLSTATE code and constraint name PostgreSQL
   reports.
 
@@ -278,6 +335,8 @@ Normal development and the default tests only use the small dataset.
 | [large-dataset.test.ts](database/tests/large-dataset.test.ts) | Scaled-down generated dataset: row counts, 1–4 lines per order, totals and reservations consistent; the planner uses `orders_customer_id_idx` instead of a sequential scan, and `inventory_pkey` for availability lookups |
 | [functions/get_customer_orders.test.ts](database/tests/functions/get_customer_orders.test.ts) | Only the requested customer's orders, returned fields and values, newest-first ordering, empty result, errors for unknown and `NULL` customers |
 | [functions/get_product_availability.test.ts](database/tests/functions/get_product_availability.test.ts) | Quantities, only the requested warehouse, zeros when not stocked, fully reserved stock, errors for unknown product/warehouse and `NULL`s |
+| [functions/reserve_stock.test.ts](database/tests/functions/reserve_stock.test.ts) | Reservation and return value, accumulation, reserving all stock, `JD001` with unchanged inventory, not stocked, inactive product/warehouse, invalid arguments |
+| [functions/reserve_stock.concurrency.test.ts](database/tests/functions/reserve_stock.concurrency.test.ts) | Real parallel connections: a competing reservation waits for the row lock, then fails after `COMMIT` or succeeds after `ROLLBACK`; 12 clients racing for 5 units → exactly 5 succeed; rollback of the surrounding transaction undoes the reservation |
 
 The tests need the PostgreSQL container to be running (`docker compose up -d`).
 
