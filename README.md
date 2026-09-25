@@ -18,11 +18,11 @@ Done:
 - Core schema with database-level integrity constraints
 - Deterministic seed data, plus an optional large generated dataset
 - Integration tests against real PostgreSQL, run in CI
-- `get_customer_orders()`
+- `get_customer_orders()`, `get_product_availability()`
 - First index optimisation with `EXPLAIN ANALYZE` evidence
   ([docs/query-optimization.md](docs/query-optimization.md))
 
-Planned next: `get_product_availability`, `reserve_stock`, `create_order`, an
+Planned next: `reserve_stock`, `create_order`, an
 order status history trigger, views, `get_best_selling_products`, and a thin
 Node.js API.
 
@@ -166,6 +166,31 @@ SELECT * FROM get_customer_orders(1);
 
 Source: [get_customer_orders.sql](database/functions/get_customer_orders.sql)
 
+### `get_product_availability(product_id BIGINT, warehouse_id BIGINT)`
+
+Stock of one product in one warehouse. It always returns exactly one row.
+
+```sql
+-- Product 5 = noise-cancelling headphones, warehouse 1 = Helsinki (seed data)
+SELECT * FROM get_product_availability(5, 1);
+```
+
+```text
+ quantity_on_hand | quantity_reserved | quantity_available
+------------------+-------------------+--------------------
+               40 |                 1 |                 39
+```
+
+- A product that isn't stocked in the warehouse returns zeros.
+- An unknown product or warehouse raises `P0002` (`no_data_found`) with a
+  message naming which one. A `NULL` id raises `22023`.
+- It's a read-only snapshot and locks nothing; claiming stock will be
+  `reserve_stock()`'s job.
+- No extra index: the lookup uses the `inventory` primary key
+  ([measured](docs/query-optimization.md#2-stock-of-one-product-in-one-warehouse-get_product_availability)).
+
+Source: [get_product_availability.sql](database/functions/get_product_availability.sql)
+
 ## Migrations
 
 `npm run db:migrate` ([database/scripts/migrations.ts](database/scripts/migrations.ts))
@@ -250,8 +275,9 @@ Normal development and the default tests only use the small dataset.
 | [migrations.test.ts](database/tests/migrations.test.ts) | Checksums recorded, re-running is a no-op, edited migrations rejected, repeatable files re-applied only when changed and applied in order, failing files fully rolled back |
 | [constraints.test.ts](database/tests/constraints.test.ts) | Uniqueness, formats, non-negative stock and prices, reservation limits, foreign keys and delete behaviour, generated columns |
 | [seed.test.ts](database/tests/seed.test.ts) | Row counts, re-runnability, order totals match lines, reservations match open orders |
-| [large-dataset.test.ts](database/tests/large-dataset.test.ts) | Scaled-down generated dataset: row counts, 1–4 lines per order, totals and reservations consistent; the planner uses `orders_customer_id_idx` instead of a sequential scan |
+| [large-dataset.test.ts](database/tests/large-dataset.test.ts) | Scaled-down generated dataset: row counts, 1–4 lines per order, totals and reservations consistent; the planner uses `orders_customer_id_idx` instead of a sequential scan, and `inventory_pkey` for availability lookups |
 | [functions/get_customer_orders.test.ts](database/tests/functions/get_customer_orders.test.ts) | Only the requested customer's orders, returned fields and values, newest-first ordering, empty result, errors for unknown and `NULL` customers |
+| [functions/get_product_availability.test.ts](database/tests/functions/get_product_availability.test.ts) | Quantities, only the requested warehouse, zeros when not stocked, fully reserved stock, errors for unknown product/warehouse and `NULL`s |
 
 The tests need the PostgreSQL container to be running (`docker compose up -d`).
 
