@@ -72,6 +72,7 @@ Database
   migrate            Apply pending migrations
   status             List applied and pending migrations
   seed               Replace all data with the sample dataset
+  seed-large         Replace all data with the sample + large generated dataset
   reset [-y]         Delete ALL data, then start, migrate and seed from scratch
 
 Project
@@ -111,6 +112,7 @@ cmd_shell() { compose_exec postgres bash; }
 cmd_migrate() { ensure_node_modules; npm run -s db:migrate; }
 cmd_status()  { ensure_node_modules; npm run -s db:status; }
 cmd_seed()    { ensure_node_modules; npm run -s db:seed; }
+cmd_seed_large() { ensure_node_modules; npm run -s db:seed:large; }
 cmd_test()    { ensure_node_modules; npm test; }
 
 cmd_reset() {
@@ -147,6 +149,9 @@ main() {
   case $command in
     up | down | restart | ps | logs | psql | shell | migrate | status | seed | reset | setup | test | adminer)
       "cmd_$command" "$@"
+      ;;
+    seed-large)
+      cmd_seed_large "$@"
       ;;
     help | -h | --help)
       cmd_help
