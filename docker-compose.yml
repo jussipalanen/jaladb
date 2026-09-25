@@ -1,0 +1,79 @@
+services:
+  postgres:
+    image: postgres:18
+    container_name: jaladb-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-jaladb}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jaladb_local}
+      POSTGRES_DB: ${POSTGRES_DB:-jaladb}
+      TZ: UTC
+    ports:
+      # Bound to localhost only: this is a development database.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # PostgreSQL 18 images keep versioned data directories under /var/lib/postgresql.
+      - jaladb-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Web GUI for browsing the database: http://localhost:5050
+  # Runs in desktop mode (no pgAdmin login) with the JalaDB server pre-registered.
+  pgadmin:
+    image: dpage/pgadmin4:9
+    container_name: jaladb-pgadmin
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: unused-in-desktop-mode
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    ports:
+      - "127.0.0.1:${PGADMIN_PORT:-5050}:80"
+    configs:
+      - source: pgadmin-servers
+        target: /pgadmin4/servers.json
+      - source: pgadmin-pgpass
+        target: /pgpass
+        uid: "5050"
+        gid: "0"
+        mode: 0600
+    volumes:
+      - jaladb-pgadmin:/var/lib/pgadmin
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/misc/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+configs:
+  pgadmin-servers:
+    content: |
+      {
+        "Servers": {
+          "1": {
+            "Name": "JalaDB",
+            "Group": "Servers",
+            "Host": "postgres",
+            "Port": 5432,
+            "MaintenanceDB": "${POSTGRES_DB:-jaladb}",
+            "Username": "${POSTGRES_USER:-jaladb}",
+            "PassFile": "/pgpass",
+            "SSLMode": "prefer"
+          }
+        }
+      }
+  pgadmin-pgpass:
+    content: |
+      postgres:5432:*:${POSTGRES_USER:-jaladb}:${POSTGRES_PASSWORD:-jaladb_local}
+
+volumes:
+  jaladb-data:
+  jaladb-pgadmin:
