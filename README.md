@@ -11,6 +11,9 @@ It is a database demonstration, not a webshop.
 
 ## Status
 
+Current release: **[v0.1.0](https://github.com/jussipalanen/jaladb/releases/tag/v0.1.0)**.
+Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+
 Done:
 
 - Docker Compose setup with PostgreSQL 18 and Adminer
@@ -614,6 +617,7 @@ jaladb/
 ├── .github/workflows/  # CI
 ├── dev                 # development helper script
 ├── docker-compose.yml
+├── CHANGELOG.md
 ├── .env.example
 └── package.json
 ```

@@ -1,6 +1,6 @@
 {
   "name": "jaladb",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "PostgreSQL-focused commerce and inventory database demo",
   "type": "module",

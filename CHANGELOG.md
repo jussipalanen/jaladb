@@ -1,0 +1,93 @@
+# Changelog
+
+All notable changes to JalaDB are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Before 1.0.0, minor versions may include breaking changes.
+
+## [Unreleased]
+
+### Added
+
+- This changelog. Package versions now match the released version (`0.1.0`).
+
+## [0.1.0] - 2026-09-25
+
+The first complete version: PostgreSQL schema, business functions, trigger,
+measured indexes, integration tests and a thin Node.js API.
+
+### Added
+
+#### Database
+
+- Core schema: `customers`, `categories`, `products`, `warehouses`, `inventory`,
+  `orders`, `order_items`, with named `CHECK`, `UNIQUE`, `NOT NULL` and foreign
+  key constraints, `NUMERIC` money, BIGINT identity keys, and generated columns
+  `inventory.quantity_available` (`VIRTUAL`) and `order_items.line_total`
+  (`STORED`) ([#2])
+- `get_customer_orders(customer_id)`: a customer's orders, newest first
+  ([#6])
+- `get_product_availability(product_id, warehouse_id)`: stock on hand,
+  reserved and available ([#10])
+- `reserve_stock(product_id, warehouse_id, quantity)`: stock reservation under
+  a `SELECT ... FOR UPDATE` row lock, with project-specific SQLSTATEs `JD001`
+  (insufficient stock) and `JD002` (inactive product or warehouse) ([#12])
+- `create_order(customer_id, warehouse_id, items)`: atomic order creation that
+  reserves stock in `product_id` order to prevent deadlocks ([#14])
+- `order_status_history` table with a statement-level insert trigger
+  (transition table) and a row-level status-change trigger that fires only on
+  real changes ([#16])
+- `get_best_selling_products(start_date, end_date, limit)`: top products by
+  units sold in an inclusive date range ([#18])
+- `product_inventory_summary` view: stock per product summed over all
+  warehouses ([#20])
+
+#### Performance
+
+- B-tree index on `orders (customer_id)` for customer order lookups, chosen
+  over a composite index after measuring both ([#8])
+- Index on `order_status_history (order_id, changed_at, history_id)` ([#16])
+- BRIN index on `orders (created_at)` with `pages_per_range = 32` for
+  date-range reports; 24 kB against 2,208 kB for a B-tree ([#18])
+- `docs/query-optimization.md` with `EXPLAIN ANALYZE` before/after comparisons
+  and reproducible scripts for every index decision ([#8], [#10], [#18], [#20])
+
+#### Tooling
+
+- Docker Compose setup with PostgreSQL 18 and Adminer ([#2])
+- Migration runner: versioned migrations with checksums and an advisory lock;
+  repeatable files for functions, views and triggers ([#2], [#6])
+- Deterministic sample seed data ([#2]) and an optional generator for
+  100,000 orders and 250,000 order lines ([#8])
+- `dev` helper script for Docker, database, test and API tasks ([#2], [#24])
+- Integration tests against real PostgreSQL, including concurrency tests
+  with parallel connections: 167 database tests and 45 API tests
+- GitHub Actions CI for database tests, API tests and tooling checks ([#4],
+  [#24])
+- Dependabot for npm, GitHub Actions and Docker images; alerts and security
+  updates enabled ([#23], [#24])
+
+#### API
+
+- Fastify API in `backend/` with `GET /api/health`,
+  `GET /api/customers/:id/orders`, `GET /api/products/:id/availability`,
+  `POST /api/inventory/reserve`, `POST /api/orders` and
+  `GET /api/reports/best-selling`. It uses parameterised SQL only, JSON-schema
+  validation, and maps SQLSTATEs to HTTP statuses ([#24])
+
+[Unreleased]: https://github.com/jussipalanen/jaladb/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/jussipalanen/jaladb/releases/tag/v0.1.0
+
+[#2]: https://github.com/jussipalanen/jaladb/pull/2
+[#4]: https://github.com/jussipalanen/jaladb/pull/4
+[#6]: https://github.com/jussipalanen/jaladb/pull/6
+[#8]: https://github.com/jussipalanen/jaladb/pull/8
+[#10]: https://github.com/jussipalanen/jaladb/pull/10
+[#12]: https://github.com/jussipalanen/jaladb/pull/12
+[#14]: https://github.com/jussipalanen/jaladb/pull/14
+[#16]: https://github.com/jussipalanen/jaladb/pull/16
+[#18]: https://github.com/jussipalanen/jaladb/pull/18
+[#20]: https://github.com/jussipalanen/jaladb/pull/20
+[#23]: https://github.com/jussipalanen/jaladb/pull/23
+[#24]: https://github.com/jussipalanen/jaladb/pull/24
