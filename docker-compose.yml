@@ -20,60 +20,24 @@ services:
       timeout: 3s
       retries: 10
 
-  # Web GUI for browsing the database: http://localhost:5050
-  # Runs in desktop mode (no pgAdmin login) with the JalaDB server pre-registered.
-  pgadmin:
-    image: dpage/pgadmin4:9
-    container_name: jaladb-pgadmin
+  # Web GUI for browsing the database: http://localhost:8080
+  # Log in with System "PostgreSQL", Server "postgres" and the credentials from .env.
+  adminer:
+    image: adminer:5
+    container_name: jaladb-adminer
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@example.com
-      PGADMIN_DEFAULT_PASSWORD: unused-in-desktop-mode
-      PGADMIN_CONFIG_SERVER_MODE: "False"
-      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      ADMINER_DEFAULT_SERVER: postgres
     ports:
-      - "127.0.0.1:${PGADMIN_PORT:-5050}:80"
-    configs:
-      - source: pgadmin-servers
-        target: /pgadmin4/servers.json
-      - source: pgadmin-pgpass
-        target: /pgpass
-        uid: "5050"
-        gid: "0"
-        mode: 0600
-    volumes:
-      - jaladb-pgadmin:/var/lib/pgadmin
+      - "127.0.0.1:${ADMINER_PORT:-8080}:8080"
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/misc/ping"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
       interval: 10s
       timeout: 5s
-      retries: 12
-      start_period: 30s
-
-configs:
-  pgadmin-servers:
-    content: |
-      {
-        "Servers": {
-          "1": {
-            "Name": "JalaDB",
-            "Group": "Servers",
-            "Host": "postgres",
-            "Port": 5432,
-            "MaintenanceDB": "${POSTGRES_DB:-jaladb}",
-            "Username": "${POSTGRES_USER:-jaladb}",
-            "PassFile": "/pgpass",
-            "SSLMode": "prefer"
-          }
-        }
-      }
-  pgadmin-pgpass:
-    content: |
-      postgres:5432:*:${POSTGRES_USER:-jaladb}:${POSTGRES_PASSWORD:-jaladb_local}
+      retries: 5
 
 volumes:
   jaladb-data:
-  jaladb-pgadmin:

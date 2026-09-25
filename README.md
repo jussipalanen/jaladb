@@ -11,7 +11,7 @@ It is a database demonstration, not a webshop.
 
 **Phase 1 – PostgreSQL foundation** (current):
 
-- Docker Compose setup with PostgreSQL 18 and pgAdmin
+- Docker Compose setup with PostgreSQL 18 and Adminer
 - Versioned SQL migrations with a small migration runner
 - Core schema with database-level integrity constraints
 - Deterministic seed data
@@ -28,7 +28,7 @@ indexes with `EXPLAIN ANALYZE` examples, and a thin Node.js API.
 - Node.js 22+ and TypeScript (migration/seed tooling and tests)
 - `pg` driver: plain SQL, no ORM
 - Vitest
-- Docker Compose, pgAdmin 4
+- Docker Compose, Adminer (web GUI)
 
 ## Getting started
 
@@ -36,7 +36,7 @@ Prerequisites: Docker with Compose, Node.js 22 or newer.
 
 ```bash
 cp .env.example .env        # local configuration
-docker compose up -d        # start PostgreSQL and pgAdmin
+docker compose up -d        # start PostgreSQL and Adminer
 npm install
 npm run db:migrate          # create the schema
 npm run db:seed             # load sample data
@@ -47,7 +47,7 @@ npm test                    # run the integration tests
 
 | Command              | Description                                                            |
 | -------------------- | ---------------------------------------------------------------------- |
-| `docker compose up -d` | Start PostgreSQL (`localhost:5432`) and pgAdmin (`localhost:5050`)   |
+| `docker compose up -d` | Start PostgreSQL (`localhost:5432`) and Adminer (`localhost:8080`)   |
 | `docker compose down`  | Stop the containers (add `-v` to delete all data)                    |
 | `npm run db:migrate` | Apply pending migrations                                               |
 | `npm run db:status`  | List applied and pending migrations                                    |
@@ -57,8 +57,12 @@ npm test                    # run the integration tests
 
 ### Browsing the database
 
-pgAdmin runs at <http://localhost:5050> without a login, with the **JalaDB**
-server already registered. For the command line:
+Adminer, a lightweight web GUI, runs at
+<http://localhost:8080/?pgsql=postgres&username=jaladb&db=jaladb>. The link
+preselects PostgreSQL and fills in the server, user and database, so only the
+password from `.env` (`jaladb_local` by default) is needed.
+
+For the command line:
 
 ```bash
 docker compose exec postgres psql -U jaladb -d jaladb
