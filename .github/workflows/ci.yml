@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A new push to the same branch or PR cancels the run it supersedes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  database:
+    name: Database tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        # Same major version as docker-compose.yml.
+        image: postgres:18
+        env:
+          POSTGRES_USER: jaladb
+          POSTGRES_PASSWORD: jaladb_ci
+          POSTGRES_DB: jaladb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U jaladb -d jaladb"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://jaladb:jaladb_ci@localhost:5432/jaladb
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Apply migrations to an empty database
+        run: npm run db:migrate
+
+      - name: Re-running migrations is a no-op
+        run: npm run db:migrate | grep -q "Database is up to date."
+
+      - name: Load seed data
+        run: npm run db:seed
+
+      - name: Integration tests
+        run: npm test
+
+  tooling:
+    name: Tooling checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Lint dev helper script
+        run: shellcheck --shell=bash dev
+
+      - name: Validate docker-compose.yml
+        run: docker compose config --quiet
