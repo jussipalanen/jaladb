@@ -16,13 +16,15 @@ Done:
 - Docker Compose setup with PostgreSQL 18 and Adminer
 - Versioned SQL migrations plus repeatable function/view/trigger files
 - Core schema with database-level integrity constraints
-- Deterministic seed data
+- Deterministic seed data, plus an optional large generated dataset
 - Integration tests against real PostgreSQL, run in CI
 - `get_customer_orders()`
+- First index optimisation with `EXPLAIN ANALYZE` evidence
+  ([docs/query-optimization.md](docs/query-optimization.md))
 
-Planned next: indexes with `EXPLAIN ANALYZE` examples, `get_product_availability`,
-`reserve_stock`, `create_order`, an order status history trigger, views,
-`get_best_selling_products`, and a thin Node.js API.
+Planned next: `get_product_availability`, `reserve_stock`, `create_order`, an
+order status history trigger, views, `get_best_selling_products`, and a thin
+Node.js API.
 
 ## Technology
 
@@ -58,6 +60,7 @@ the full list.
 | `./dev migrate`          | Apply pending migrations                                        |
 | `./dev status`           | List applied and pending migrations                             |
 | `./dev seed`             | Replace all data with the sample dataset                        |
+| `./dev seed-large`       | Replace all data with the sample + large generated dataset      |
 | `./dev reset [-y]`       | Delete all data, then start, migrate and seed from scratch      |
 | `./dev test`             | Run the database integration tests                              |
 | `./dev adminer`          | Print the Adminer login URL and password                        |
@@ -80,6 +83,7 @@ npm install
 npm run db:migrate          # apply pending migrations
 npm run db:status           # list applied and pending migrations
 npm run db:seed             # replace all data with the sample dataset
+npm run db:seed:large       # sample data + ~100,000 generated orders
 npm test                    # run the integration tests
 npm run typecheck           # type-check the TypeScript tooling and tests
 docker compose down         # stop (add -v to delete all data)
@@ -128,9 +132,11 @@ Design decisions:
   cascades, because order lines have no meaning without their order.
 - **Order status** is `TEXT` with a `CHECK` constraint rather than an enum type,
   so the allowed values are easy to change later.
-- **No performance indexes yet.** Only the indexes behind primary keys and unique
-  constraints exist. Indexes for query patterns will be added with the queries
-  that need them, together with `EXPLAIN ANALYZE` before/after comparisons.
+- **Indexes only for measured query patterns.** Apart from the indexes behind
+  primary keys and unique constraints, each index comes with the query it
+  serves and `EXPLAIN ANALYZE` evidence in
+  [docs/query-optimization.md](docs/query-optimization.md). So far:
+  `orders (customer_id)` for `get_customer_orders()`.
 
 ## Database functions
 
@@ -204,6 +210,30 @@ The dataset covers every order status. Stock is reserved for open (`pending` and
 
 `npm run db:seed` truncates all tables first, so it can be re-run at any time.
 
+### Large dataset (optional)
+
+`./dev seed-large` (`npm run db:seed:large`) loads the sample data and then
+[generate_large_dataset.sql](database/seeds/large/generate_large_dataset.sql)
+in the same transaction. It takes about 10 seconds:
+
+| Table         | Rows    |
+| ------------- | ------: |
+| `products`    | 10,024  |
+| `customers`   | 10,012  |
+| `orders`      | 100,018 |
+| `order_items` | 249,952 |
+
+- **Plain SQL.** It uses `generate_series`, and `setseed()` makes it reproducible:
+  every run produces the same data.
+- **Realistic shape.** Orders run from 2024 to September 2026, some customers
+  order far more often than others, and recent orders are still open.
+- **Consistent.** The same invariants as the small seed hold: totals match
+  lines, and reservations match open orders.
+- **Scalable.** The size is set by `jaladb.seed_scale` (default 1). The tests
+  use `SET LOCAL jaladb.seed_scale = '0.02'`.
+
+Normal development and the default tests only use the small dataset.
+
 ## Tests
 
 `npm test` runs integration tests against real PostgreSQL. No database mocks.
@@ -220,6 +250,7 @@ The dataset covers every order status. Stock is reserved for open (`pending` and
 | [migrations.test.ts](database/tests/migrations.test.ts) | Checksums recorded, re-running is a no-op, edited migrations rejected, repeatable files re-applied only when changed and applied in order, failing files fully rolled back |
 | [constraints.test.ts](database/tests/constraints.test.ts) | Uniqueness, formats, non-negative stock and prices, reservation limits, foreign keys and delete behaviour, generated columns |
 | [seed.test.ts](database/tests/seed.test.ts) | Row counts, re-runnability, order totals match lines, reservations match open orders |
+| [large-dataset.test.ts](database/tests/large-dataset.test.ts) | Scaled-down generated dataset: row counts, 1–4 lines per order, totals and reservations consistent; the planner uses `orders_customer_id_idx` instead of a sequential scan |
 | [functions/get_customer_orders.test.ts](database/tests/functions/get_customer_orders.test.ts) | Only the requested customer's orders, returned fields and values, newest-first ordering, empty result, errors for unknown and `NULL` customers |
 
 The tests need the PostgreSQL container to be running (`docker compose up -d`).
@@ -242,9 +273,10 @@ jaladb/
 ├── database/
 │   ├── migrations/   # versioned schema changes (SQL)
 │   ├── functions/    # PL/pgSQL functions, one per file (repeatable)
-│   ├── seeds/        # sample data (SQL)
+│   ├── seeds/        # sample data (SQL); large/ holds the generator
 │   ├── scripts/      # migration and seed runner (TypeScript)
 │   └── tests/        # PostgreSQL integration tests (Vitest)
+├── docs/               # query optimisation write-ups and EXPLAIN scripts
 ├── .github/workflows/  # CI
 ├── dev                 # development helper script
 ├── docker-compose.yml
