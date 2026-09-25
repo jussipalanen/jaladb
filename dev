@@ -41,6 +41,13 @@ ensure_node_modules() {
   fi
 }
 
+ensure_backend_modules() {
+  ensure_node_modules  # the API tests use the database tooling in the root
+  if [ ! -d backend/node_modules ]; then
+    npm --prefix backend install
+  fi
+}
+
 confirm() {
   local prompt=$1
   if [ "${ASSUME_YES:-0}" = 1 ]; then return 0; fi
@@ -74,6 +81,10 @@ Database
   seed               Replace all data with the sample dataset
   seed-large         Replace all data with the sample + large generated dataset
   reset [-y]         Delete ALL data, then start, migrate and seed from scratch
+
+API (backend/)
+  api                Start the API in watch mode on http://localhost:$(env_value API_PORT 3000)
+  test-api           Run the API integration tests
 
 Project
   setup              First-time setup: .env, npm install, start, migrate, seed
@@ -114,6 +125,8 @@ cmd_status()  { ensure_node_modules; npm run -s db:status; }
 cmd_seed()    { ensure_node_modules; npm run -s db:seed; }
 cmd_seed_large() { ensure_node_modules; npm run -s db:seed:large; }
 cmd_test()    { ensure_node_modules; npm test; }
+cmd_api()     { ensure_env; ensure_backend_modules; npm --prefix backend run dev; }
+cmd_test_api() { ensure_backend_modules; npm --prefix backend test; }
 
 cmd_reset() {
   if [ "${1:-}" = "-y" ]; then ASSUME_YES=1; fi
@@ -129,12 +142,13 @@ cmd_reset() {
 
 cmd_setup() {
   ensure_env
-  ensure_node_modules
+  ensure_backend_modules
   cmd_up
   cmd_migrate
   cmd_seed
   echo
-  echo "Ready. Run './dev test' to run the tests."
+  echo "Ready. Run './dev test' and './dev test-api' to run the tests,"
+  echo "and './dev api' to start the API."
 }
 
 cmd_adminer() {
@@ -152,6 +166,12 @@ main() {
       ;;
     seed-large)
       cmd_seed_large "$@"
+      ;;
+    api)
+      cmd_api "$@"
+      ;;
+    test-api)
+      cmd_test_api "$@"
       ;;
     help | -h | --help)
       cmd_help
