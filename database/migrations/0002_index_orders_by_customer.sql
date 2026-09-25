@@ -1,0 +1,26 @@
+-- 0002_index_orders_by_customer.sql
+--
+-- Supports get_customer_orders(): "orders of one customer, newest first".
+--
+--   WHERE o.customer_id = $1
+--   ORDER BY o.created_at DESC, o.order_id DESC
+--
+-- Without an index PostgreSQL reads every order to find one customer's rows.
+-- With it, the planner reads only that customer's index entries and heap pages.
+--
+-- Why a single column and not (customer_id, created_at DESC, order_id DESC)?
+-- Both were measured on the large dataset (docs/query-optimization.md): the
+-- planner uses a bitmap scan plus a tiny in-memory sort with either index, so
+-- the extra sort columns bring no benefit for this query. The single-column
+-- index is over 4x smaller, because B-tree deduplication stores each
+-- customer_id once with a list of row pointers. The composite index becomes
+-- worthwhile if the function gains pagination (ORDER BY ... LIMIT n).
+--
+-- The index also serves the foreign key check when a customer row is deleted
+-- (PostgreSQL does not index referencing columns automatically).
+--
+-- On a large production table this would be built with CREATE INDEX
+-- CONCURRENTLY to avoid blocking writes. That cannot run inside a
+-- transaction, and every migration here runs in one.
+
+CREATE INDEX orders_customer_id_idx ON orders (customer_id);
