@@ -63,6 +63,7 @@ describe('migrations', () => {
         'customers',
         'inventory',
         'order_items',
+        'order_status_history',
         'orders',
         'products',
         'schema_migrations',

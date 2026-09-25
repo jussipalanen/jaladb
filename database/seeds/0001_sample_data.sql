@@ -10,8 +10,12 @@
 --   * quantity_on_hand is the current physical stock (shipped/delivered orders
 --     have already left the warehouse).
 --   * quantity_reserved equals the units of open ('pending' or 'paid') orders.
+--
+-- Orders are inserted with their current status, so the order status history
+-- trigger records one creation row per order (NULL -> current status).
 
-TRUNCATE order_items, orders, inventory, products, categories, warehouses, customers
+TRUNCATE order_status_history, order_items, orders, inventory, products, categories,
+         warehouses, customers
     RESTART IDENTITY;
 
 -- ---------------------------------------------------------------------------
