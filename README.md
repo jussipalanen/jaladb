@@ -19,12 +19,12 @@ Done:
 - Deterministic seed data, plus an optional large generated dataset
 - Integration tests against real PostgreSQL, run in CI
 - `get_customer_orders()`, `get_product_availability()`, `reserve_stock()`,
-  `create_order()`
-- First index optimisation with `EXPLAIN ANALYZE` evidence
+  `create_order()`, `get_best_selling_products()`
+- Index optimisations (B-tree, BRIN) with `EXPLAIN ANALYZE` evidence
   ([docs/query-optimization.md](docs/query-optimization.md))
 - Order status history, recorded by triggers
 
-Planned next: views, `get_best_selling_products`, and a thin Node.js API
+Planned next: a view, and a thin Node.js API
 (`backend/`), then an optional React demo console (`frontend/`).
 
 ## Technology
@@ -139,8 +139,9 @@ Design decisions:
   primary keys and unique constraints, each index comes with the query it
   serves and `EXPLAIN ANALYZE` evidence in
   [docs/query-optimization.md](docs/query-optimization.md). So far:
-  `orders (customer_id)` for `get_customer_orders()`, and
-  `order_status_history (order_id, changed_at, history_id)` for an order's history.
+  `orders (customer_id)` for `get_customer_orders()`,
+  `order_status_history (order_id, changed_at, history_id)` for an order's history,
+  and a BRIN index on `orders (created_at)` for date-range reports.
 
 ## Database functions
 
@@ -269,6 +270,39 @@ JSONB is only the input format, matching a future API request body. The lines
 are stored relationally in `order_items`.
 
 Source: [create_order.sql](database/functions/create_order.sql)
+
+### `get_best_selling_products(start_date DATE, end_date DATE, limit INTEGER)`
+
+Top products by units sold in a date range.
+
+```sql
+SELECT * FROM get_best_selling_products('2026-01-01', '2026-06-30', 3);
+```
+
+```text
+ product_id |    sku    |            name             | units_sold | revenue
+------------+-----------+-----------------------------+------------+---------
+         11 | OUTD-3003 | Insulated Water Bottle 1 L  |          3 |   89.70
+         18 | OFFC-5003 | A5 Dotted Notebook (3-pack) |          3 |   44.70
+          3 | ELEC-1003 | USB-C Charger 65 W          |          2 |   79.80
+```
+
+- **Sold** means status `paid`, `shipped` or `delivered`. Pending (unpaid) and
+  cancelled orders don't count.
+- **Revenue** uses the prices at the time of purchase (`order_items.line_total`).
+- **Dates** are inclusive and interpreted in the session time zone (UTC by
+  default). The filter is `created_at >= start AND created_at < end + 1`: the
+  whole last day counts, and the condition can use an index.
+- **Order:** units sold, then revenue, then product id, so results are
+  deterministic.
+- **Errors:** `22023` for `NULL`s, a start date after the end date, or a limit
+  below 1.
+- **Index:** a 24 kB **BRIN** index on `orders (created_at)` makes one-day
+  reports about 7× faster. For a month or more, aggregating order lines
+  dominates and no index on `orders` helps
+  ([measured](docs/query-optimization.md#3-best-selling-products-in-a-date-range-get_best_selling_products)).
+
+Source: [get_best_selling_products.sql](database/functions/get_best_selling_products.sql)
 
 ### Error codes
 
@@ -415,12 +449,13 @@ Normal development and the default tests only use the small dataset.
 | [migrations.test.ts](database/tests/migrations.test.ts) | Checksums recorded, re-running is a no-op, edited migrations rejected, repeatable files re-applied only when changed and applied in order, failing files fully rolled back |
 | [constraints.test.ts](database/tests/constraints.test.ts) | Uniqueness, formats, non-negative stock and prices, reservation limits, foreign keys and delete behaviour, generated columns |
 | [seed.test.ts](database/tests/seed.test.ts) | Row counts, re-runnability, order totals match lines, reservations match open orders |
-| [large-dataset.test.ts](database/tests/large-dataset.test.ts) | Scaled-down generated dataset: row counts, 1–4 lines per order, totals and reservations consistent; the planner uses `orders_customer_id_idx` instead of a sequential scan, and `inventory_pkey` for availability lookups |
+| [large-dataset.test.ts](database/tests/large-dataset.test.ts) | Scaled-down generated dataset: row counts, 1–4 lines per order, totals and reservations consistent; the planner uses `orders_customer_id_idx` instead of a sequential scan, `inventory_pkey` for availability lookups, the history index, and the BRIN index definition and usability |
 | [functions/get_customer_orders.test.ts](database/tests/functions/get_customer_orders.test.ts) | Only the requested customer's orders, returned fields and values, newest-first ordering, empty result, errors for unknown and `NULL` customers |
 | [functions/get_product_availability.test.ts](database/tests/functions/get_product_availability.test.ts) | Quantities, only the requested warehouse, zeros when not stocked, fully reserved stock, errors for unknown product/warehouse and `NULL`s |
 | [functions/reserve_stock.test.ts](database/tests/functions/reserve_stock.test.ts) | Reservation and return value, accumulation, reserving all stock, `JD001` with unchanged inventory, not stocked, inactive product/warehouse, invalid arguments |
 | [functions/create_order.test.ts](database/tests/functions/create_order.test.ts) | Order, lines, price snapshot, total = sum of lines, reservations, listed by `get_customer_orders`; failure on the last line or an inactive product leaves nothing behind; unknown references; 14 kinds of invalid input |
 | [functions/create_order.concurrency.test.ts](database/tests/functions/create_order.concurrency.test.ts) | Lines are locked in `product_id` order regardless of input order (checked with a third connection and `lock_timeout`); 20 concurrent orders with reversed product order complete without deadlocks; 8 orders competing for 3 units: exactly 3 complete, the rest leave no partial reservations |
+| [functions/get_best_selling_products.test.ts](database/tests/functions/get_best_selling_products.test.ts) | Totals across orders, purchase-time prices, status filter, date boundaries (first/last day in, day before/after out), single-day range, ordering and tie-breaks, limit, empty result, invalid arguments |
 | [triggers/order_status_history.test.ts](database/tests/triggers/order_status_history.test.ts) | Creation row (single insert, multi-row insert, `create_order`); old/new status recorded; sequence in order; multi-row update records only real changes; rollback; no row for same-status or other-column updates; cascade delete; table constraints |
 | [functions/reserve_stock.concurrency.test.ts](database/tests/functions/reserve_stock.concurrency.test.ts) | Real parallel connections: a competing reservation waits for the row lock, then fails after `COMMIT` or succeeds after `ROLLBACK`; 12 clients racing for 5 units → exactly 5 succeed; rollback of the surrounding transaction undoes the reservation |
 

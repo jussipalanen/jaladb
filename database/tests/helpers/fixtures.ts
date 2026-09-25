@@ -103,13 +103,17 @@ export async function createOrder(
   return { orderId, customerId: owner };
 }
 
-/** Adds a line for a new product to an order. */
+/** Adds a line to an order, for the given product or a new one. */
 export async function addOrderItem(
   client: Client,
   orderId: Id,
-  { quantity, unitPrice = '1.00' }: { quantity: number; unitPrice?: string },
+  { quantity, unitPrice = '1.00', productId: existingProductId }: {
+    quantity: number;
+    unitPrice?: string;
+    productId?: Id;
+  },
 ): Promise<void> {
-  const productId = await createProduct(client, { price: unitPrice });
+  const productId = existingProductId ?? (await createProduct(client, { price: unitPrice }));
   await client.query(
     'INSERT INTO order_items (order_id, product_id, quantity, unit_price) VALUES ($1, $2, $3, $4)',
     [orderId, productId, quantity, unitPrice],
