@@ -1,7 +1,7 @@
 import type { Client } from 'pg';
 import { connect, getDatabaseUrl, loadEnv } from './db.ts';
 import { migrate, migrationStatus } from './migrations.ts';
-import { seed } from './seed.ts';
+import { LARGE_SEEDS_DIR, SEEDS_DIR, seed } from './seed.ts';
 
 const commands: Record<string, (client: Client) => Promise<void>> = {
   async migrate(client) {
@@ -20,6 +20,12 @@ const commands: Record<string, (client: Client) => Promise<void>> = {
 
   async seed(client) {
     for (const file of await seed(client)) console.log(`Loaded ${file}`);
+  },
+
+  async 'seed-large'(client) {
+    const started = performance.now();
+    for (const file of await seed(client, [SEEDS_DIR, LARGE_SEEDS_DIR])) console.log(`Loaded ${file}`);
+    console.log(`Done in ${((performance.now() - started) / 1000).toFixed(1)} s`);
   },
 };
 

@@ -11,6 +11,7 @@
     "db:migrate": "tsx database/scripts/cli.ts migrate",
     "db:status": "tsx database/scripts/cli.ts status",
     "db:seed": "tsx database/scripts/cli.ts seed",
+    "db:seed:large": "tsx database/scripts/cli.ts seed-large",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
