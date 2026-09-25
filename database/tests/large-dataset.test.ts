@@ -154,6 +154,38 @@ describe('order_status_history_order_id_idx', () => {
   });
 });
 
+describe('orders_created_at_brin_idx', () => {
+  it('is a BRIN index with 32-page block ranges and autosummarize', async () => {
+    const { rows } = await client.query(`
+      SELECT am.amname, c.reloptions
+      FROM pg_class c JOIN pg_am am ON am.oid = c.relam
+      WHERE c.relname = 'orders_created_at_brin_idx'
+    `);
+
+    expect(rows).toEqual([{ amname: 'brin', reloptions: ['pages_per_range=32', 'autosummarize=on'] }]);
+  });
+
+  it('can serve the date filter of get_best_selling_products()', async () => {
+    // The scaled-down test table fits in one block range, where a sequential
+    // scan is naturally cheaper, so sequential scans are disabled to check
+    // that the filter's form (no function around created_at) can use the
+    // index. The real benefit is measured in docs/query-optimization.md.
+    await client.query('SET LOCAL enable_seqscan = off');
+    try {
+      const nodes = await planNodes(
+        `SELECT o.order_id FROM orders o
+         WHERE o.status IN ('paid', 'shipped', 'delivered')
+           AND o.created_at >= $1::date AND o.created_at < $2::date + 1`,
+        ['2026-06-15', '2026-06-15'],
+      );
+
+      expect(nodes.map((n) => n['Index Name'])).toContain('orders_created_at_brin_idx');
+    } finally {
+      await client.query('RESET enable_seqscan');
+    }
+  });
+});
+
 describe('inventory_pkey', () => {
   it('serves the get_product_availability() lookup without an extra index', async () => {
     const { rows } = await client.query(
