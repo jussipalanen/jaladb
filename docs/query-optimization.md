@@ -208,6 +208,129 @@ time.
 The planner test in [large-dataset.test.ts](../database/tests/large-dataset.test.ts)
 checks that the lookup uses `inventory_pkey`.
 
+---
+
+## 3. Best-selling products in a date range: `get_best_selling_products()`
+
+Migration: [0004_brin_index_orders_created_at.sql](../database/migrations/0004_brin_index_orders_created_at.sql)
+· Script: [sql/explain_best_selling_products.sql](sql/explain_best_selling_products.sql)
+
+### The query
+
+```sql
+SELECT oi.product_id, sum(oi.quantity), sum(oi.line_total)
+FROM orders o
+JOIN order_items oi ON oi.order_id = o.order_id
+WHERE o.status IN ('paid', 'shipped', 'delivered')
+  AND o.created_at >= $start AND o.created_at < $end + 1
+GROUP BY oi.product_id
+ORDER BY 2 DESC, 3 DESC, 1
+LIMIT $limit;
+```
+
+The date filter is written as a half-open range on the bare column. A form
+like `created_at::date BETWEEN ...` would wrap the column in a function, and no
+plain index on `created_at` could serve it.
+
+### Measurements
+
+Median of 5–7 runs per cell; individual runs vary by a few milliseconds.
+Candidates: no index, a B-tree, and BRIN indexes with different block sizes
+(`pages_per_range`):
+
+| Range     | No index | B-tree       | BRIN, 128 pages | **BRIN, 32 pages** | BRIN, 16 pages |
+| --------- | -------: | -----------: | --------------: | -----------------: | -------------: |
+| 1 day     |   7.3 ms | **0.4 ms**   |          3.2 ms |         **1.0 ms** |         0.7 ms |
+| 1 week    |   8.1 ms | 18.7 ms ⚠    |          5.9 ms |         **4.7 ms** |        18.6 ms ⚠ |
+| 1 month   |  25.5 ms | 30.6 ms      |         32.2 ms |            30.6 ms |        31.6 ms |
+| 1 quarter |  45.6 ms | 47.8 ms      |         40.3 ms |        **38.3 ms** |        37.3 ms |
+| 1 year    |  76.5 ms | 68.9 ms      |         73.7 ms |            76.3 ms |        86.5 ms |
+| Size      |        – | 2,208 kB     |           24 kB |          **24 kB** |          24 kB |
+
+⚠ = the planner switched to a worse plan (a parallel sequential scan of all
+order lines).
+
+### What the plans show
+
+**For a month or more, the order lines dominate, not the orders.** A month has
+about 2,900 sold orders with about 7,200 lines. PostgreSQL reads all 250,000
+order lines sequentially and hash-joins them, because 2,336 sequential page
+reads are cheaper than about 2,900 separate index lookups. No index on `orders`
+changes that:
+
+```text
+->  Hash Join
+      ->  Seq Scan on order_items oi (actual time=0.008..10.616 rows=249952.00 loops=1)
+      ->  Hash
+            ->  Bitmap Heap Scan on orders o (actual time=0.031..1.891 rows=2854.00 loops=1)
+Execution Time: 34.213 ms
+```
+
+Without the index, the planner splits that scan across two parallel workers.
+With a cheaper way to find the orders, it picks a single-threaded plan instead,
+so a month is about 5 ms slower with either index. That's a planner costing
+effect, not the index doing extra work.
+
+**For short ranges, finding the orders is the cost, and an index removes it.**
+Without an index, one day still reads all of `orders`:
+
+```text
+->  Parallel Seq Scan on orders o (actual time=3.666..4.189 rows=58.00 loops=2)
+Execution Time: 8.072 ms
+```
+
+With BRIN, PostgreSQL reads only the page blocks whose `created_at` range
+overlaps the day:
+
+```text
+->  Bitmap Heap Scan on orders o (actual time=0.592..0.640 rows=116.00 loops=1)
+      Rows Removed by Index Recheck: 6066
+      Heap Blocks: lossy=64
+      ->  Bitmap Index Scan on orders_created_at_brin_idx (actual time=0.029..0.029 rows=640.00 loops=1)
+            Index Cond: ((created_at >= '2026-06-15'::date) AND (created_at < '2026-06-16'::date))
+Execution Time: 1.061 ms
+```
+
+"Lossy" means the index only knows which blocks *might* match. PostgreSQL
+reads those 64 pages and rechecks each row, which removes 6,066 rows that are
+outside the day.
+
+### Decision: BRIN with `pages_per_range = 32`
+
+- **Why BRIN works here:** orders are appended in time order, so the table's
+  physical order follows `created_at` (correlation 0.9995). A BRIN index only
+  stores the minimum and maximum `created_at` per block of pages. That's why it
+  is **24 kB against 2,208 kB** for the B-tree, and almost free to maintain on
+  every `INSERT`.
+- **Short ranges** (the "today" or "this week" cards a dashboard would show)
+  are 2–7× faster. The B-tree is fastest for exactly one day, but for one week
+  it led the planner into a plan twice as slow as having no index.
+- **Long ranges** (a month or more): all variants are within about 10–20% of
+  each other, sometimes in the index's favour and sometimes against it (the
+  parallel-plan effect above). Aggregating order lines dominates; making that
+  faster would need a different
+  approach (e.g. a pre-aggregated daily sales table), which isn't justified at
+  this data size.
+- **32 pages per block:** finer than the default 128, so short ranges skip more
+  of the table. 16 made the planner pick the bad parallel plan for one week.
+- **`autosummarize = on`:** autovacuum summarises each newly filled block
+  range. Without it, pages added since the last `VACUUM` stay unsummarised and
+  are always scanned.
+
+**Things to keep an eye on:**
+
+- BRIN depends on physical order. Status updates write new row versions; if a
+  page has no free space, the new version lands on a different page, far from
+  rows of the same date, and that block's min/max range widens. The
+  `correlation` value in `pg_stats` shows the state. A lower `fillfactor` on
+  `orders` would keep updates on the same page (HOT updates, since no B-tree
+  covers `status`), if that ever becomes a problem.
+- The test dataset fits in one block range, where a sequential scan is
+  naturally cheaper. The test in
+  [large-dataset.test.ts](../database/tests/large-dataset.test.ts) therefore
+  checks the index definition, and that the function's filter can use the index
+  with sequential scans disabled. The speed-up itself is measured here.
+
 ## Reproduce
 
 ```bash
@@ -216,10 +339,11 @@ checks that the lookup uses `inventory_pkey`.
 ./dev seed-large                                        # ~10 s
 ./dev psql < docs/sql/explain_customer_orders.sql       # section 1: before and after
 ./dev psql < docs/sql/explain_product_availability.sql  # section 2
+./dev psql < docs/sql/explain_best_selling_products.sql # section 3
 ```
 
-`explain_customer_orders.sql` drops the index inside a transaction, runs
-`EXPLAIN ANALYZE`, and rolls back. PostgreSQL DDL is transactional, so the index
+`explain_customer_orders.sql` and `explain_best_selling_products.sql` drop
+or create indexes inside a transaction, run `EXPLAIN ANALYZE`, and roll back. PostgreSQL DDL is transactional, so the index
 is back immediately afterwards.
 
 Run `./dev seed` to return to the small dataset.
