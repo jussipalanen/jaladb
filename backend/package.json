@@ -1,6 +1,6 @@
 {
   "name": "jaladb-backend",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Thin HTTP API over the JalaDB PostgreSQL functions",
   "type": "module",
