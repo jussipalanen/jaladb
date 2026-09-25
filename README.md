@@ -18,13 +18,13 @@ Done:
 - Core schema with database-level integrity constraints
 - Deterministic seed data, plus an optional large generated dataset
 - Integration tests against real PostgreSQL, run in CI
-- `get_customer_orders()`, `get_product_availability()`, `reserve_stock()`
+- `get_customer_orders()`, `get_product_availability()`, `reserve_stock()`,
+  `create_order()`
 - First index optimisation with `EXPLAIN ANALYZE` evidence
   ([docs/query-optimization.md](docs/query-optimization.md))
 
-Planned next: `create_order`, an
-order status history trigger, views, `get_best_selling_products`, and a thin
-Node.js API.
+Planned next: an order status history trigger, views,
+`get_best_selling_products`, and a thin Node.js API.
 
 ## Technology
 
@@ -231,6 +231,41 @@ COMMIT;                           -- terminal 2 fails: requested 20, available 9
 
 Source: [reserve_stock.sql](database/functions/reserve_stock.sql)
 
+### `create_order(customer_id BIGINT, warehouse_id BIGINT, items JSONB)`
+
+Creates an order with its lines, reserves the stock, and returns the new order
+id. Either everything happens or nothing does.
+
+```sql
+SELECT create_order(1, 1, '[{"product_id": 5, "quantity": 2},
+                            {"product_id": 7, "quantity": 1}]');   -- returns 19
+```
+
+1. **Validate first.** `items` must be a non-empty array of objects with an
+   integer `product_id` and a positive integer `quantity`, with no product
+   listed twice, and the customer must exist. All of this is checked before any
+   stock is touched.
+2. **Reserve stock in `product_id` order** with `reserve_stock()`, whatever
+   order the lines are given in. Two orders with the same products then lock
+   inventory rows in the same order and can't deadlock each other.
+3. **Insert once.** Prices are read once, and the order (status `pending`, total
+   = Σ quantity × price) and its lines (`unit_price` = price at purchase) are
+   built from those same values. The total always matches the lines, and the
+   order row is never updated afterwards.
+
+**Atomicity:** the call runs as one statement. If any line fails (out of stock,
+inactive, unknown product), PostgreSQL undoes everything the call did: no
+order, no lines, and no reservations for the lines before it.
+
+**Deadlocks:** with the sort removed, the concurrency tests produce real
+`40P01 deadlock detected` errors when orders list the same products in opposite
+order. With it, 20 such concurrent orders all complete.
+
+JSONB is only the input format, matching a future API request body. The lines
+are stored relationally in `order_items`.
+
+Source: [create_order.sql](database/functions/create_order.sql)
+
 ### Error codes
 
 The functions raise specific SQLSTATEs, so the API can map errors without
@@ -239,9 +274,9 @@ parsing messages:
 | SQLSTATE | Meaning | Raised by | Planned HTTP status |
 | --- | --- | --- | --- |
 | `P0002` `no_data_found` | Customer, product or warehouse does not exist | all functions | 404 |
-| `22023` `invalid_parameter_value` | `NULL` argument, non-positive quantity | all functions | 400 |
-| `JD001` | Insufficient stock (message has requested and available quantities) | `reserve_stock` | 409 |
-| `JD002` | Product or warehouse is inactive | `reserve_stock` | 409 |
+| `22023` `invalid_parameter_value` | `NULL` argument, non-positive quantity, malformed order items | all functions | 400 |
+| `JD001` | Insufficient stock (message has requested and available quantities) | `reserve_stock`, `create_order` | 409 |
+| `JD002` | Product or warehouse is inactive | `reserve_stock`, `create_order` | 409 |
 
 `JD` is a project-specific SQLSTATE class, chosen so it can't collide with
 PostgreSQL's own codes.
@@ -336,6 +371,8 @@ Normal development and the default tests only use the small dataset.
 | [functions/get_customer_orders.test.ts](database/tests/functions/get_customer_orders.test.ts) | Only the requested customer's orders, returned fields and values, newest-first ordering, empty result, errors for unknown and `NULL` customers |
 | [functions/get_product_availability.test.ts](database/tests/functions/get_product_availability.test.ts) | Quantities, only the requested warehouse, zeros when not stocked, fully reserved stock, errors for unknown product/warehouse and `NULL`s |
 | [functions/reserve_stock.test.ts](database/tests/functions/reserve_stock.test.ts) | Reservation and return value, accumulation, reserving all stock, `JD001` with unchanged inventory, not stocked, inactive product/warehouse, invalid arguments |
+| [functions/create_order.test.ts](database/tests/functions/create_order.test.ts) | Order, lines, price snapshot, total = sum of lines, reservations, listed by `get_customer_orders`; failure on the last line or an inactive product leaves nothing behind; unknown references; 14 kinds of invalid input |
+| [functions/create_order.concurrency.test.ts](database/tests/functions/create_order.concurrency.test.ts) | Lines are locked in `product_id` order regardless of input order (checked with a third connection and `lock_timeout`); 20 concurrent orders with reversed product order complete without deadlocks; 8 orders competing for 3 units: exactly 3 complete, the rest leave no partial reservations |
 | [functions/reserve_stock.concurrency.test.ts](database/tests/functions/reserve_stock.concurrency.test.ts) | Real parallel connections: a competing reservation waits for the row lock, then fails after `COMMIT` or succeeds after `ROLLBACK`; 12 clients racing for 5 units → exactly 5 succeed; rollback of the surrounding transaction undoes the reservation |
 
 The tests need the PostgreSQL container to be running (`docker compose up -d`).
