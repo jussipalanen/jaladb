@@ -22,9 +22,10 @@ Done:
   `create_order()`
 - First index optimisation with `EXPLAIN ANALYZE` evidence
   ([docs/query-optimization.md](docs/query-optimization.md))
+- Order status history, recorded by triggers
 
-Planned next: an order status history trigger, views,
-`get_best_selling_products`, and a thin Node.js API.
+Planned next: views, `get_best_selling_products`, and a thin Node.js API
+(`backend/`), then an optional React demo console (`frontend/`).
 
 ## Technology
 
@@ -103,6 +104,7 @@ prints both.
 categories 1 ──< products  1 ──< inventory   >── 1 warehouses
 customers  1 ──< orders    1 ──< order_items >── 1 products
 orders       >── 1 warehouses   (fulfilling warehouse)
+orders     1 ──< order_status_history   (written by triggers)
 ```
 
 | Table         | Purpose                                                           |
@@ -114,6 +116,7 @@ orders       >── 1 warehouses   (fulfilling warehouse)
 | `customers`   | Customers with a unique, case-insensitive email                   |
 | `orders`      | Order header: customer, fulfilling warehouse, status, stored total |
 | `order_items` | Order lines with the unit price at purchase time                  |
+| `order_status_history` | Every status change of an order, written by triggers     |
 
 Design decisions:
 
@@ -136,7 +139,8 @@ Design decisions:
   primary keys and unique constraints, each index comes with the query it
   serves and `EXPLAIN ANALYZE` evidence in
   [docs/query-optimization.md](docs/query-optimization.md). So far:
-  `orders (customer_id)` for `get_customer_orders()`.
+  `orders (customer_id)` for `get_customer_orders()`, and
+  `order_status_history (order_id, changed_at, history_id)` for an order's history.
 
 ## Database functions
 
@@ -281,6 +285,50 @@ parsing messages:
 `JD` is a project-specific SQLSTATE class, chosen so it can't collide with
 PostgreSQL's own codes.
 
+## Triggers
+
+### Order status history
+
+[database/triggers/order_status_history.sql](database/triggers/order_status_history.sql)
+records every order status change in `order_status_history`:
+
+```sql
+UPDATE orders SET status = 'paid'    WHERE order_id = 18;
+UPDATE orders SET status = 'paid'    WHERE order_id = 18;   -- same status: nothing recorded
+UPDATE orders SET status = 'shipped' WHERE order_id = 18;
+
+SELECT old_status, new_status, changed_at
+FROM order_status_history WHERE order_id = 18 ORDER BY changed_at, history_id;
+```
+
+```text
+ old_status | new_status |       changed_at
+------------+------------+------------------------
+            | pending    | 2026-09-22 09:14:00+00      ← created
+ pending    | paid       | 2026-09-25 14:57:12+00
+ paid       | shipped    | 2026-09-25 14:57:12+00
+```
+
+- **On insert:** a *statement-level* `AFTER INSERT` trigger with a transition
+  table records each new order's initial status (`NULL → status`) at its
+  `created_at`. Bulk inserts write their history in one `INSERT ... SELECT`.
+  For the large dataset's 100,000 orders this adds about 1 second.
+- **On status change:** a *row-level* `AFTER UPDATE OF status` trigger with
+  `WHEN (OLD.status IS DISTINCT FROM NEW.status)`. PostgreSQL checks the
+  condition before calling the trigger function, so same-status updates and
+  updates of other columns record nothing and cost nothing.
+- **Safety net:** `CHECK (old_status IS DISTINCT FROM new_status)`. With the
+  `WHEN` condition removed, the tests show that same-status updates would fail
+  on this constraint.
+- History is written in the same transaction as the change, so a rollback
+  removes both. Deleting an order deletes its history (`ON DELETE CASCADE`).
+- `changed_at` is the transaction time: several changes in one transaction
+  share a timestamp, and `history_id` keeps their order.
+
+Stock effects of status changes (releasing reservations on cancellation,
+deducting stock on shipping) are deliberately not in a trigger. They belong in
+an explicit `update_order_status()` function, planned as a separate issue.
+
 ## Migrations
 
 `npm run db:migrate` ([database/scripts/migrations.ts](database/scripts/migrations.ts))
@@ -373,6 +421,7 @@ Normal development and the default tests only use the small dataset.
 | [functions/reserve_stock.test.ts](database/tests/functions/reserve_stock.test.ts) | Reservation and return value, accumulation, reserving all stock, `JD001` with unchanged inventory, not stocked, inactive product/warehouse, invalid arguments |
 | [functions/create_order.test.ts](database/tests/functions/create_order.test.ts) | Order, lines, price snapshot, total = sum of lines, reservations, listed by `get_customer_orders`; failure on the last line or an inactive product leaves nothing behind; unknown references; 14 kinds of invalid input |
 | [functions/create_order.concurrency.test.ts](database/tests/functions/create_order.concurrency.test.ts) | Lines are locked in `product_id` order regardless of input order (checked with a third connection and `lock_timeout`); 20 concurrent orders with reversed product order complete without deadlocks; 8 orders competing for 3 units: exactly 3 complete, the rest leave no partial reservations |
+| [triggers/order_status_history.test.ts](database/tests/triggers/order_status_history.test.ts) | Creation row (single insert, multi-row insert, `create_order`); old/new status recorded; sequence in order; multi-row update records only real changes; rollback; no row for same-status or other-column updates; cascade delete; table constraints |
 | [functions/reserve_stock.concurrency.test.ts](database/tests/functions/reserve_stock.concurrency.test.ts) | Real parallel connections: a competing reservation waits for the row lock, then fails after `COMMIT` or succeeds after `ROLLBACK`; 12 clients racing for 5 units → exactly 5 succeed; rollback of the surrounding transaction undoes the reservation |
 
 The tests need the PostgreSQL container to be running (`docker compose up -d`).
@@ -395,6 +444,7 @@ jaladb/
 ├── database/
 │   ├── migrations/   # versioned schema changes (SQL)
 │   ├── functions/    # PL/pgSQL functions, one per file (repeatable)
+│   ├── triggers/     # triggers and their functions (repeatable)
 │   ├── seeds/        # sample data (SQL); large/ holds the generator
 │   ├── scripts/      # migration and seed runner (TypeScript)
 │   └── tests/        # PostgreSQL integration tests (Vitest)

@@ -87,6 +87,17 @@ describe('seed data', () => {
     expect(rows).toEqual([]);
   });
 
+  it('has a creation row in the status history for every order', async () => {
+    const { rows } = await db().query(`
+      SELECT o.order_id
+      FROM orders o
+      LEFT JOIN order_status_history h
+        ON h.order_id = o.order_id AND h.old_status IS NULL AND h.new_status = o.status
+      WHERE h.history_id IS NULL
+    `);
+    expect(rows).toEqual([]);
+  });
+
   it('includes open orders, closed orders and a customer without orders', async () => {
     const { rows } = await db().query(`
       SELECT

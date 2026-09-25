@@ -38,6 +38,17 @@ describe('large dataset generator', () => {
     expect(rows[0]).toEqual({ products: 200, customers: 200, orders: 2000 + 18, seed_customer: 1 });
   });
 
+  it('records one status history row per order (statement-level trigger)', async () => {
+    const { rows } = await client.query(`
+      SELECT (SELECT count(*) FROM orders)::int AS orders,
+             (SELECT count(*) FROM order_status_history)::int AS history,
+             (SELECT count(*) FROM order_status_history h JOIN orders o USING (order_id)
+              WHERE h.old_status IS NULL AND h.new_status = o.status AND h.changed_at = o.created_at)::int AS matching
+    `);
+
+    expect(rows[0]).toEqual({ orders: 2018, history: 2018, matching: 2018 });
+  });
+
   it('gives every generated order 1-4 lines', async () => {
     const { rows } = await client.query(`
       SELECT min(line_count)::int AS min, max(line_count)::int AS max
@@ -123,6 +134,23 @@ describe('orders_customer_id_idx', () => {
     expect(nodes).not.toContainEqual(
       expect.objectContaining({ 'Node Type': 'Seq Scan', 'Relation Name': 'orders' }),
     );
+  });
+});
+
+describe('order_status_history_order_id_idx', () => {
+  it('is used to read the history of one order', async () => {
+    const { rows } = await client.query('SELECT max(order_id) AS order_id FROM orders');
+
+    const nodes = await planNodes(
+      `SELECT h.old_status, h.new_status, h.changed_at
+       FROM order_status_history h
+       WHERE h.order_id = $1
+       ORDER BY h.changed_at, h.history_id`,
+      [rows[0].order_id],
+    );
+
+    expect(nodes.map((n) => n['Index Name'])).toContain('order_status_history_order_id_idx');
+    expect(nodes).not.toContainEqual(expect.objectContaining({ 'Node Type': 'Seq Scan' }));
   });
 });
 
