@@ -159,17 +159,67 @@ index scan can then read the first 20 entries and skip the sort. If
   totals first and inserts each order once. `MERGE ... RETURNING` (PostgreSQL
   17+) maps the generated rows to their new ids.
 
+---
+
+## 2. Stock of one product in one warehouse: `get_product_availability()`
+
+Script: [sql/explain_product_availability.sql](sql/explain_product_availability.sql)
+
+This is an example of **not** adding an index. The function looks up one
+`inventory` row by `(product_id, warehouse_id)`, which is exactly the primary
+key of `inventory`, and checks that the product and warehouse exist through
+their own primary keys.
+
+```text
+Index Scan using inventory_pkey on inventory i (actual time=0.051..0.052 rows=1.00 loops=1)
+  Index Cond: ((product_id = 5024) AND (warehouse_id = 1))
+  Index Searches: 1
+  Buffers: shared hit=6
+Execution Time: 0.064 ms
+```
+
+```text
+Result (actual time=0.017..0.017 rows=1.00 loops=1)
+  InitPlan 1
+    ->  Index Only Scan using products_pkey on products p (actual time=0.016..0.016 rows=1.00 loops=1)
+          Index Cond: (product_id = 5024)
+          Buffers: shared hit=3
+Execution Time: 0.027 ms
+```
+
+Each part is a single index lookup on a table of 30,042 inventory rows. An
+additional index would only add write overhead.
+
+### First call vs. later calls
+
+`EXPLAIN ANALYZE` on the function call itself shows only a `Function Scan`,
+but its timing shows something else. Repeated calls in **one** session:
+
+| Call | 1st | 2nd | 3rd | 4th | 5th |
+| ---- | --: | --: | --: | --: | --: |
+| ms   | 1.36 | 0.14 | 0.25 | 0.15 | 0.12 |
+
+The first call in a session compiles the PL/pgSQL function and prepares its
+queries. PL/pgSQL caches both for the rest of the session, so later calls cost
+only the lookups. The future API keeps connections open in a pool and gets the
+fast case. A new connection per request would pay the first-call cost every
+time.
+
+The planner test in [large-dataset.test.ts](../database/tests/large-dataset.test.ts)
+checks that the lookup uses `inventory_pkey`.
+
 ## Reproduce
 
 ```bash
 ./dev up
 ./dev migrate
-./dev seed-large                                   # ~10 s
-./dev psql < docs/sql/explain_customer_orders.sql  # before and after
+./dev seed-large                                        # ~10 s
+./dev psql < docs/sql/explain_customer_orders.sql       # section 1: before and after
+./dev psql < docs/sql/explain_product_availability.sql  # section 2
 ```
 
-The script drops the index inside a transaction, runs `EXPLAIN ANALYZE`, and
-rolls back. PostgreSQL DDL is transactional, so the index is back immediately
-afterwards.
+`explain_customer_orders.sql` drops the index inside a transaction, runs
+`EXPLAIN ANALYZE`, and rolls back. PostgreSQL DDL is transactional, so the index
+is back immediately afterwards.
 
 Run `./dev seed` to return to the small dataset.
