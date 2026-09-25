@@ -23,8 +23,9 @@ Done:
 - Index optimisations (B-tree, BRIN) with `EXPLAIN ANALYZE` evidence
   ([docs/query-optimization.md](docs/query-optimization.md))
 - Order status history, recorded by triggers
+- `product_inventory_summary` view
 
-Planned next: a view, and a thin Node.js API
+Planned next: a thin Node.js API
 (`backend/`), then an optional React demo console (`frontend/`).
 
 ## Technology
@@ -319,6 +320,38 @@ parsing messages:
 `JD` is a project-specific SQLSTATE class, chosen so it can't collide with
 PostgreSQL's own codes.
 
+## Views
+
+### `product_inventory_summary`
+
+One row per product with its stock summed over all warehouses.
+
+```sql
+SELECT sku, name, category, warehouse_count, quantity_on_hand, quantity_reserved, quantity_available
+FROM product_inventory_summary
+WHERE sku IN ('ELEC-1001', 'OUTD-3001', 'SPRT-6004')
+ORDER BY sku;
+```
+
+```text
+    sku    |            name             |  category   | warehouse_count | quantity_on_hand | quantity_reserved | quantity_available
+-----------+-----------------------------+-------------+-----------------+------------------+-------------------+--------------------
+ ELEC-1001 | Noise-Cancelling Headphones | Electronics |               1 |               40 |                 1 |                 39
+ OUTD-3001 | Down Sleeping Bag -10 °C    | Outdoor     |               3 |               33 |                 0 |                 33
+ SPRT-6004 | Cross-Country Ski Wax Kit   | Sports      |               1 |                4 |                 0 |                  4
+```
+
+- Every product appears. Products not stocked anywhere show zeros (`LEFT JOIN`),
+  and inactive products are included with `is_active = false`.
+- It's a plain view, so it always reflects the current stock, including
+  reservations made a moment ago.
+- **Filters are applied before the aggregation:** a lookup by SKU reads one
+  product and its inventory rows through indexes, in about 0.05 ms on the large
+  dataset, against 26.5 ms when the filter can't be pushed down
+  ([measured](docs/query-optimization.md#4-a-view-with-aggregation-product_inventory_summary)).
+
+Source: [product_inventory_summary.sql](database/views/product_inventory_summary.sql)
+
 ## Triggers
 
 ### Order status history
@@ -449,13 +482,14 @@ Normal development and the default tests only use the small dataset.
 | [migrations.test.ts](database/tests/migrations.test.ts) | Checksums recorded, re-running is a no-op, edited migrations rejected, repeatable files re-applied only when changed and applied in order, failing files fully rolled back |
 | [constraints.test.ts](database/tests/constraints.test.ts) | Uniqueness, formats, non-negative stock and prices, reservation limits, foreign keys and delete behaviour, generated columns |
 | [seed.test.ts](database/tests/seed.test.ts) | Row counts, re-runnability, order totals match lines, reservations match open orders |
-| [large-dataset.test.ts](database/tests/large-dataset.test.ts) | Scaled-down generated dataset: row counts, 1–4 lines per order, totals and reservations consistent; the planner uses `orders_customer_id_idx` instead of a sequential scan, `inventory_pkey` for availability lookups, the history index, and the BRIN index definition and usability |
+| [large-dataset.test.ts](database/tests/large-dataset.test.ts) | Scaled-down generated dataset: row counts, 1–4 lines per order, totals and reservations consistent; the planner uses `orders_customer_id_idx` instead of a sequential scan, `inventory_pkey` for availability lookups, the history index, the BRIN index definition and usability, and filter pushdown into `product_inventory_summary` |
 | [functions/get_customer_orders.test.ts](database/tests/functions/get_customer_orders.test.ts) | Only the requested customer's orders, returned fields and values, newest-first ordering, empty result, errors for unknown and `NULL` customers |
 | [functions/get_product_availability.test.ts](database/tests/functions/get_product_availability.test.ts) | Quantities, only the requested warehouse, zeros when not stocked, fully reserved stock, errors for unknown product/warehouse and `NULL`s |
 | [functions/reserve_stock.test.ts](database/tests/functions/reserve_stock.test.ts) | Reservation and return value, accumulation, reserving all stock, `JD001` with unchanged inventory, not stocked, inactive product/warehouse, invalid arguments |
 | [functions/create_order.test.ts](database/tests/functions/create_order.test.ts) | Order, lines, price snapshot, total = sum of lines, reservations, listed by `get_customer_orders`; failure on the last line or an inactive product leaves nothing behind; unknown references; 14 kinds of invalid input |
 | [functions/create_order.concurrency.test.ts](database/tests/functions/create_order.concurrency.test.ts) | Lines are locked in `product_id` order regardless of input order (checked with a third connection and `lock_timeout`); 20 concurrent orders with reversed product order complete without deadlocks; 8 orders competing for 3 units: exactly 3 complete, the rest leave no partial reservations |
 | [functions/get_best_selling_products.test.ts](database/tests/functions/get_best_selling_products.test.ts) | Totals across orders, purchase-time prices, status filter, date boundaries (first/last day in, day before/after out), single-day range, ordering and tie-breaks, limit, empty result, invalid arguments |
+| [views/product_inventory_summary.test.ts](database/tests/views/product_inventory_summary.test.ts) | Sums over warehouses, product data and category name, zeros for unstocked products, inactive products included, one row per product, reservations visible immediately |
 | [triggers/order_status_history.test.ts](database/tests/triggers/order_status_history.test.ts) | Creation row (single insert, multi-row insert, `create_order`); old/new status recorded; sequence in order; multi-row update records only real changes; rollback; no row for same-status or other-column updates; cascade delete; table constraints |
 | [functions/reserve_stock.concurrency.test.ts](database/tests/functions/reserve_stock.concurrency.test.ts) | Real parallel connections: a competing reservation waits for the row lock, then fails after `COMMIT` or succeeds after `ROLLBACK`; 12 clients racing for 5 units → exactly 5 succeed; rollback of the surrounding transaction undoes the reservation |
 
@@ -479,6 +513,7 @@ jaladb/
 ├── database/
 │   ├── migrations/   # versioned schema changes (SQL)
 │   ├── functions/    # PL/pgSQL functions, one per file (repeatable)
+│   ├── views/        # views, one per file (repeatable)
 │   ├── triggers/     # triggers and their functions (repeatable)
 │   ├── seeds/        # sample data (SQL); large/ holds the generator
 │   ├── scripts/      # migration and seed runner (TypeScript)

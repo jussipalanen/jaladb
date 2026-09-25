@@ -331,6 +331,72 @@ outside the day.
   checks the index definition, and that the function's filter can use the index
   with sequential scans disabled. The speed-up itself is measured here.
 
+---
+
+## 4. A view with aggregation: `product_inventory_summary`
+
+View: [product_inventory_summary.sql](../database/views/product_inventory_summary.sql)
+
+The view sums each product's stock over all warehouses with
+`GROUP BY p.product_id, c.category_id`. The question is what happens when a
+caller filters the view:
+
+```sql
+SELECT * FROM product_inventory_summary WHERE sku = 'GEN-005000';
+```
+
+If PostgreSQL applied `sku = ...` only *after* the `GROUP BY`, every lookup
+would sum the stock of all 10,000 products first. I expected that risk because
+`sku` is not a grouping column, and compared three designs: this one, grouping
+by every output column, and a `LATERAL` subquery per product.
+
+### Result: the filter is pushed below the aggregation
+
+```text
+Subquery Scan on product_inventory_summary (actual time=0.080..0.081 rows=1.00 loops=1)
+  ->  GroupAggregate
+        ->  Nested Loop Left Join
+              ->  Merge Join
+                    ->  Index Scan using products_sku_key on products p (rows=1.00 loops=1)
+                          Index Cond: (sku = 'GEN-005000'::text)
+                    ->  Seq Scan on categories c (rows=6.00 loops=1)
+              ->  Index Scan using inventory_pkey on inventory i (rows=3.00 loops=1)
+                    Index Cond: (product_id = p.product_id)
+```
+
+`sku` is functionally dependent on `product_id`, the grouped primary key, so
+filtering products before grouping gives the same result, and PostgreSQL does
+exactly that. It finds the product through its unique SKU index and sums only
+its 3 inventory rows.
+
+To show what this is worth, the same view with an optimisation fence
+(`OFFSET 0`, which stops PostgreSQL from pushing conditions into a subquery):
+
+| Query (large dataset, median of 5) | Time | Pages read |
+| --- | ---: | ---: |
+| `product_inventory_summary WHERE sku = ...` | **0.05 ms** | 7 |
+| Same view with `OFFSET 0` fence, same filter | 26.5 ms | 323 |
+| `product_inventory_summary WHERE category = 'Books'` | 11.5 ms | 323 |
+| `product_inventory_summary`, all 10,024 rows | 27.6 ms | 323 |
+
+### Design comparison
+
+| Design | By `product_id` | By `sku` | By category | All rows |
+| --- | ---: | ---: | ---: | ---: |
+| **`GROUP BY` primary keys (chosen)** | 0.04 ms | 0.05 ms | **7.2 ms** | **27.0 ms** |
+| `GROUP BY` every output column | 0.04 ms | 0.04 ms | 7.4 ms | 27.2 ms |
+| `LATERAL` sum per product | 0.03 ms | 0.04 ms | 15.1 ms | 32.0 ms |
+
+Single-product lookups are equally fast in all three. For larger result sets,
+one hash aggregation over `inventory` beats a separate index lookup per
+product, so the `LATERAL` version is about 2× slower for a category. The
+simplest design wins.
+
+The planner test in [large-dataset.test.ts](../database/tests/large-dataset.test.ts)
+checks that the SKU condition is applied where `products` is read, and that
+inventory is read through `inventory_pkey`. With `OFFSET 0` added to the view,
+that test fails.
+
 ## Reproduce
 
 ```bash
