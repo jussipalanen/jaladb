@@ -24,14 +24,15 @@ Done:
   ([docs/query-optimization.md](docs/query-optimization.md))
 - Order status history, recorded by triggers
 - `product_inventory_summary` view
+- Node.js API (`backend/`) exposing the database functions over HTTP
 
-Planned next: a thin Node.js API
-(`backend/`), then an optional React demo console (`frontend/`).
+Planned next: an optional React demo console (`frontend/`).
 
 ## Technology
 
 - PostgreSQL 18
-- Node.js 22+ and TypeScript (migration/seed tooling and tests)
+- Node.js 22+ and TypeScript (migration/seed tooling, API, tests)
+- Fastify 5 for the API
 - `pg` driver: plain SQL, no ORM
 - Vitest
 - Docker Compose, Adminer (web GUI)
@@ -42,7 +43,9 @@ Prerequisites: Docker with Compose, Node.js 22 or newer.
 
 ```bash
 ./dev setup      # create .env, npm install, start containers, migrate, seed
-./dev test       # run the integration tests
+./dev test       # run the database integration tests
+./dev api        # start the API on http://localhost:3000
+./dev test-api   # run the API integration tests
 ```
 
 ### The `dev` helper
@@ -66,6 +69,8 @@ the full list.
 | `./dev reset [-y]`       | Delete all data, then start, migrate and seed from scratch      |
 | `./dev test`             | Run the database integration tests                              |
 | `./dev adminer`          | Print the Adminer login URL and password                        |
+| `./dev api`              | Start the API in watch mode on `http://localhost:3000`          |
+| `./dev test-api`         | Run the API integration tests                                   |
 
 SQL can be passed to `psql` directly or piped in:
 
@@ -396,6 +401,81 @@ Stock effects of status changes (releasing reservations on cancellation,
 deducting stock on shipping) are deliberately not in a trigger. They belong in
 an explicit `update_order_status()` function, planned as a separate issue.
 
+## API
+
+A thin [Fastify](https://fastify.dev) API in [backend/](backend/). Each
+endpoint validates the request shape, calls **one** PostgreSQL function with
+parameterised SQL, and maps the result to JSON. Business rules (stock checks,
+locking, totals, validation of order lines) stay in the database and are not
+repeated in TypeScript.
+
+```bash
+./dev api    # http://localhost:3000, uses DATABASE_URL and API_PORT from .env
+```
+
+| Method & path | Database function | Success |
+| --- | --- | --- |
+| `GET /api/health` | `SELECT 1` | 200 (503 if the database is unreachable) |
+| `GET /api/customers/:id/orders` | `get_customer_orders` | 200 |
+| `GET /api/products/:id/availability?warehouseId=` | `get_product_availability` | 200 |
+| `POST /api/inventory/reserve` | `reserve_stock` | 200 |
+| `POST /api/orders` | `create_order` | 201 |
+| `GET /api/reports/best-selling?start=&end=&limit=` | `get_best_selling_products` | 200 |
+
+Examples with the seed data:
+
+```bash
+curl -s localhost:3000/api/customers/1/orders
+# {"customerId":1,"orders":[{"orderId":14,"status":"cancelled","totalAmount":"79.00","itemCount":1,"createdAt":"2026-08-02T19:17:00.000Z"}, ...]}
+
+curl -s 'localhost:3000/api/products/5/availability?warehouseId=1'
+# {"productId":5,"warehouseId":1,"quantityOnHand":40,"quantityReserved":1,"quantityAvailable":39}
+
+curl -s -X POST localhost:3000/api/orders -H 'content-type: application/json' \
+  -d '{"customerId":1,"warehouseId":1,"items":[{"productId":5,"quantity":2},{"productId":7,"quantity":1}]}'
+# {"orderId":19}                                                    (201 Created)
+
+curl -s -X POST localhost:3000/api/inventory/reserve -H 'content-type: application/json' \
+  -d '{"productId":5,"warehouseId":1,"quantity":999}'
+# {"error":{"code":"INSUFFICIENT_STOCK","message":"insufficient stock for product 5 in warehouse 1:
+#   requested 999, available 37","sqlstate":"JD001"}}                (409 Conflict)
+
+curl -s 'localhost:3000/api/reports/best-selling?start=2026-01-01&end=2026-06-30&limit=3'
+```
+
+**Conventions:**
+
+- JSON uses camelCase.
+- Money is returned as a decimal **string** (`"477.00"`), because PostgreSQL
+  `NUMERIC` values can't be represented exactly as JavaScript numbers.
+- IDs and counts are numbers. `BIGINT` values are converted with a check that
+  fails loudly rather than losing precision.
+- Request bodies and query strings are validated with JSON schemas. Unknown
+  fields are rejected, not silently dropped.
+
+**Errors** always have the shape `{ "error": { "code", "message", "sqlstate"? } }`:
+
+| Cause | HTTP | `code` |
+| --- | --- | --- |
+| Request fails schema validation | 400 | `VALIDATION_ERROR` |
+| Malformed JSON body | 400 | `BAD_REQUEST` |
+| `22023` and PostgreSQL input errors (`22P02`, `22003`, `22007`, `22008`) | 400 | `INVALID_ARGUMENT` |
+| `P0002` | 404 | `NOT_FOUND` |
+| `JD001` | 409 | `INSUFFICIENT_STOCK` |
+| `JD002` | 409 | `NOT_ACTIVE` |
+| Unknown route | 404 | `ROUTE_NOT_FOUND` |
+| Anything else | 500 | `INTERNAL_ERROR`, with no internal details (logged on the server) |
+
+Messages from the database functions are passed through, since they were
+written for the caller (e.g. "requested 999, available 37").
+
+**Tests** ([backend/tests/](backend/tests/)) run the real app with
+`app.inject()` against a separate, freshly migrated `jaladb_api_test` database.
+The sample seed data is reloaded before every test. No database mocks. They
+cover every endpoint's success path, validation errors, each error mapping, a
+failed order leaving no order and no reservations, and that unexpected errors
+don't leak details.
+
 ## Migrations
 
 `npm run db:migrate` ([database/scripts/migrations.ts](database/scripts/migrations.ts))
@@ -503,6 +583,8 @@ pushes to `main`:
 - **Database tests** against a PostgreSQL 18 service container: type check,
   migrations on an empty database (and a second run to confirm it is a no-op),
   seed data, and the integration tests
+- **API tests**: type check and the API integration tests against their own
+  PostgreSQL 18 service container
 - **Tooling checks**: shellcheck for the `dev` script and validation of
   `docker-compose.yml`
 
@@ -525,6 +607,9 @@ jaladb/
 │   ├── seeds/        # sample data (SQL); large/ holds the generator
 │   ├── scripts/      # migration and seed runner (TypeScript)
 │   └── tests/        # PostgreSQL integration tests (Vitest)
+├── backend/
+│   ├── src/          # Fastify app, routes, error mapping
+│   └── tests/        # API integration tests (Vitest)
 ├── docs/               # query optimisation write-ups and EXPLAIN scripts
 ├── .github/workflows/  # CI
 ├── dev                 # development helper script
