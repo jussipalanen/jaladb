@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:18
+    container_name: jaladb-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-jaladb}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jaladb_local}
+      POSTGRES_DB: ${POSTGRES_DB:-jaladb}
+      TZ: UTC
+    ports:
+      # Bound to localhost only: this is a development database.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # PostgreSQL 18 images keep versioned data directories under /var/lib/postgresql.
+      - jaladb-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Web GUI for browsing the database: http://localhost:8080
+  # Log in with System "PostgreSQL", Server "postgres" and the credentials from .env.
+  adminer:
+    image: adminer:5
+    container_name: jaladb-adminer
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    ports:
+      - "127.0.0.1:${ADMINER_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  jaladb-data:

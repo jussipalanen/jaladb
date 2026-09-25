@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+#
+# Development helper for JalaDB: short commands for Docker and database tasks.
+#
+#   ./dev help
+#
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
+ADMINER_PORT_DEFAULT=8080
+
+compose() {
+  docker compose "$@"
+}
+
+# Runs a command in a container. Without a terminal on stdin no TTY is
+# allocated, so SQL can be piped in:  ./dev psql < query.sql
+compose_exec() {
+  if [ -t 0 ]; then compose exec "$@"; else compose exec -T "$@"; fi
+}
+
+env_value() {
+  local key=$1 default=$2 value=""
+  if [ -f .env ]; then
+    value=$(grep -E "^${key}=" .env | tail -n 1 | cut -d= -f2- || true)
+  fi
+  echo "${value:-$default}"
+}
+
+ensure_env() {
+  if [ ! -f .env ]; then
+    cp .env.example .env
+    echo "Created .env from .env.example"
+  fi
+}
+
+ensure_node_modules() {
+  if [ ! -d node_modules ]; then
+    npm install
+  fi
+}
+
+confirm() {
+  local prompt=$1
+  if [ "${ASSUME_YES:-0}" = 1 ]; then return 0; fi
+  read -r -p "$prompt [y/N] " answer
+  [[ $answer =~ ^[Yy]$ ]]
+}
+
+adminer_url() {
+  local user db
+  user=$(env_value POSTGRES_USER jaladb)
+  db=$(env_value POSTGRES_DB jaladb)
+  echo "http://localhost:$(env_value ADMINER_PORT "$ADMINER_PORT_DEFAULT")/?pgsql=postgres&username=${user}&db=${db}"
+}
+
+cmd_help() {
+  cat <<EOF
+Usage: ./dev <command> [args]
+
+Docker
+  up                 Start PostgreSQL and Adminer and wait until healthy
+  down               Stop the containers (data is kept)
+  restart            Restart the containers
+  ps                 Show container status
+  logs [service]     Follow logs (all services, or postgres / adminer)
+
+Database
+  psql [args]        Open psql in the database container (extra args go to psql)
+  shell              Open a shell in the database container
+  migrate            Apply pending migrations
+  status             List applied and pending migrations
+  seed               Replace all data with the sample dataset
+  reset [-y]         Delete ALL data, then start, migrate and seed from scratch
+
+Project
+  setup              First-time setup: .env, npm install, start, migrate, seed
+  test               Run the database integration tests
+  adminer            Print the Adminer login URL
+  help               Show this help
+
+Examples
+  ./dev setup
+  ./dev psql -c 'SELECT * FROM products LIMIT 5'
+  ./dev psql < some_query.sql
+EOF
+}
+
+cmd_up() {
+  ensure_env
+  compose up -d --wait
+  echo "PostgreSQL: localhost:$(env_value POSTGRES_PORT 5432)"
+  echo "Adminer:    $(adminer_url)"
+}
+
+cmd_down()    { compose down; }
+cmd_restart() { compose restart; }
+cmd_ps()      { compose ps "$@"; }
+cmd_logs()    { compose logs -f --tail 100 "$@"; }
+
+cmd_psql() {
+  # Uses the credentials already configured inside the container.
+  # shellcheck disable=SC2016
+  compose_exec postgres \
+    sh -c 'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' psql "$@"
+}
+
+cmd_shell() { compose_exec postgres bash; }
+
+cmd_migrate() { ensure_node_modules; npm run -s db:migrate; }
+cmd_status()  { ensure_node_modules; npm run -s db:status; }
+cmd_seed()    { ensure_node_modules; npm run -s db:seed; }
+cmd_test()    { ensure_node_modules; npm test; }
+
+cmd_reset() {
+  if [ "${1:-}" = "-y" ]; then ASSUME_YES=1; fi
+  if ! confirm "This deletes ALL local database data. Continue?"; then
+    echo "Aborted."
+    exit 1
+  fi
+  compose down -v
+  cmd_up
+  cmd_migrate
+  cmd_seed
+}
+
+cmd_setup() {
+  ensure_env
+  ensure_node_modules
+  cmd_up
+  cmd_migrate
+  cmd_seed
+  echo
+  echo "Ready. Run './dev test' to run the tests."
+}
+
+cmd_adminer() {
+  adminer_url
+  echo "Password: $(env_value POSTGRES_PASSWORD jaladb_local)"
+}
+
+main() {
+  local command=${1:-help}
+  shift || true
+
+  case $command in
+    up | down | restart | ps | logs | psql | shell | migrate | status | seed | reset | setup | test | adminer)
+      "cmd_$command" "$@"
+      ;;
+    help | -h | --help)
+      cmd_help
+      ;;
+    *)
+      echo "Unknown command: $command" >&2
+      echo >&2
+      cmd_help >&2
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
