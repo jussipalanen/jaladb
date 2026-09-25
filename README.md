@@ -506,6 +506,13 @@ pushes to `main`:
 - **Tooling checks**: shellcheck for the `dev` script and validation of
   `docker-compose.yml`
 
+[Dependabot](.github/dependabot.yml) checks npm packages, GitHub Actions and
+Docker images weekly, and opens PRs that go through the same CI and review.
+Minor and patch updates are grouped; major updates arrive separately.
+PostgreSQL major versions are excluded, because they need a planned data
+upgrade. Dependabot alerts and security updates are enabled in the repository
+settings.
+
 ## Project structure
 
 ```text
