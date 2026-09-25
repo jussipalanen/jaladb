@@ -1,5 +1,7 @@
 # JalaDB
 
+[![CI](https://github.com/jussipalanen/jaladb/actions/workflows/ci.yml/badge.svg)](https://github.com/jussipalanen/jaladb/actions/workflows/ci.yml)
+
 A PostgreSQL-focused portfolio project demonstrating practical database engineering
 through a small commerce and inventory domain: relational design, integrity
 constraints, PL/pgSQL, transactions, triggers, indexing, and testing against a
@@ -176,6 +178,17 @@ The dataset covers every order status. Stock is reserved for open (`pending` and
 
 The tests need the PostgreSQL container to be running (`docker compose up -d`).
 
+### Continuous integration
+
+[GitHub Actions](.github/workflows/ci.yml) runs on every pull request and on
+pushes to `main`:
+
+- **Database tests** against a PostgreSQL 18 service container: type check,
+  migrations on an empty database (and a second run to confirm it is a no-op),
+  seed data, and the integration tests
+- **Tooling checks**: shellcheck for the `dev` script and validation of
+  `docker-compose.yml`
+
 ## Project structure
 
 ```text
@@ -185,6 +198,7 @@ jaladb/
 │   ├── seeds/        # sample data (SQL)
 │   ├── scripts/      # migration and seed runner (TypeScript)
 │   └── tests/        # PostgreSQL integration tests (Vitest)
+├── .github/workflows/  # CI
 ├── dev                 # development helper script
 ├── docker-compose.yml
 ├── .env.example
