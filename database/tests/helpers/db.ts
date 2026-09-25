@@ -44,14 +44,15 @@ export function useRollbackClient(): () => Client {
 
 /**
  * Asserts that PostgreSQL rejects a statement with the given SQLSTATE (and
- * constraint name, when given). A savepoint keeps the surrounding test
+ * constraint name or message, when given; message accepts asymmetric matchers
+ * such as expect.stringContaining). A savepoint keeps the surrounding test
  * transaction usable after the expected error.
  */
 export async function expectDbError(
   client: Client,
   sql: string,
   params: unknown[],
-  expected: { code: string; constraint?: string },
+  expected: { code: string; constraint?: string; message?: unknown },
 ): Promise<void> {
   await client.query('SAVEPOINT expect_db_error');
   let error: unknown;

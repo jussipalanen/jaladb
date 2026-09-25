@@ -11,18 +11,18 @@ It is a database demonstration, not a webshop.
 
 ## Status
 
-**Phase 1 – PostgreSQL foundation** (current):
+Done:
 
 - Docker Compose setup with PostgreSQL 18 and Adminer
-- Versioned SQL migrations with a small migration runner
+- Versioned SQL migrations plus repeatable function/view/trigger files
 - Core schema with database-level integrity constraints
 - Deterministic seed data
-- Integration tests against real PostgreSQL
+- Integration tests against real PostgreSQL, run in CI
+- `get_customer_orders()`
 
-Planned next: PL/pgSQL business functions (`get_customer_orders`,
-`get_product_availability`, `reserve_stock`, `create_order`,
-`get_best_selling_products`), an order status history trigger, views,
-indexes with `EXPLAIN ANALYZE` examples, and a thin Node.js API.
+Planned next: indexes with `EXPLAIN ANALYZE` examples, `get_product_availability`,
+`reserve_stock`, `create_order`, an order status history trigger, views,
+`get_best_selling_products`, and a thin Node.js API.
 
 ## Technology
 
@@ -132,20 +132,65 @@ Design decisions:
   constraints exist. Indexes for query patterns will be added with the queries
   that need them, together with `EXPLAIN ANALYZE` before/after comparisons.
 
+## Database functions
+
+Each function lives in its own file in [database/functions/](database/functions/).
+
+### `get_customer_orders(customer_id BIGINT)`
+
+A customer's orders, newest first.
+
+```sql
+SELECT * FROM get_customer_orders(1);
+```
+
+```text
+ order_id |  status   | total_amount | item_count |       created_at
+----------+-----------+--------------+------------+------------------------
+       14 | cancelled |        79.00 |          1 | 2026-08-02 19:17:00+00
+        6 | delivered |       174.80 |          2 | 2026-03-11 06:20:00+00
+        1 | delivered |       278.80 |          3 | 2026-01-08 08:15:00+00
+```
+
+- `item_count` is the number of units across all order lines.
+- A customer without orders gets an empty result.
+- An unknown customer raises SQLSTATE `P0002` (`no_data_found`), so callers can
+  tell "no such customer" apart from "no orders yet". A `NULL` id raises `22023`
+  (`invalid_parameter_value`).
+
+Source: [get_customer_orders.sql](database/functions/get_customer_orders.sql)
+
 ## Migrations
 
-Migrations are plain SQL files in [database/migrations/](database/migrations/),
-named `NNNN_description.sql` and applied in order by
-[database/scripts/migrations.ts](database/scripts/migrations.ts):
+`npm run db:migrate` ([database/scripts/migrations.ts](database/scripts/migrations.ts))
+applies two kinds of SQL files.
 
-- each migration runs in its own transaction, so a failing migration leaves no
-  partial schema changes (PostgreSQL supports transactional DDL)
-- applied migrations are recorded in `schema_migrations` with a SHA-256 checksum;
-  editing an already-applied migration is detected and rejected
-- a PostgreSQL advisory lock prevents concurrent migration runs
+**Versioned migrations** in [database/migrations/](database/migrations/), named
+`NNNN_description.sql`: tables, columns, constraints, indexes, and dropping
+objects. Each is applied once, in order.
 
-To change the schema, add a new migration file. Do not edit applied ones.
-Migration files must not contain their own `BEGIN`/`COMMIT`.
+- Applied migrations are recorded in `schema_migrations` with a SHA-256 checksum.
+  Editing an applied migration is detected and rejected; add a new one instead.
+
+**Repeatable files** in `database/functions/`, `database/views/` and
+`database/triggers/`, one file per object. They are applied after the versioned
+migrations, in that directory order, whenever a file is new or its content has
+changed.
+
+- They must be idempotent (`CREATE OR REPLACE FUNCTION/VIEW/TRIGGER`), so a
+  function is changed by editing its file and reviewed as a normal diff.
+- Checksums are recorded in `schema_repeatables`.
+- Changes that `CREATE OR REPLACE` cannot make (renaming, changing a function's
+  signature or return columns, removing an object) need a versioned migration
+  that drops the old object first.
+
+For both kinds:
+
+- Every file runs in its own transaction together with its tracking row, so a
+  failing file leaves no partial changes (PostgreSQL supports transactional DDL).
+- Files must not contain their own `BEGIN`/`COMMIT`.
+- A PostgreSQL advisory lock prevents concurrent migration runs.
+- `npm run db:status` lists applied and pending files.
 
 ## Seed data
 
@@ -172,9 +217,10 @@ The dataset covers every order status. Stock is reserved for open (`pending` and
 
 | File | Covers |
 | --- | --- |
-| [migrations.test.ts](database/tests/migrations.test.ts) | Checksums recorded, re-running is a no-op, edited migrations rejected, failing migrations fully rolled back |
+| [migrations.test.ts](database/tests/migrations.test.ts) | Checksums recorded, re-running is a no-op, edited migrations rejected, repeatable files re-applied only when changed and applied in order, failing files fully rolled back |
 | [constraints.test.ts](database/tests/constraints.test.ts) | Uniqueness, formats, non-negative stock and prices, reservation limits, foreign keys and delete behaviour, generated columns |
 | [seed.test.ts](database/tests/seed.test.ts) | Row counts, re-runnability, order totals match lines, reservations match open orders |
+| [functions/get_customer_orders.test.ts](database/tests/functions/get_customer_orders.test.ts) | Only the requested customer's orders, returned fields and values, newest-first ordering, empty result, errors for unknown and `NULL` customers |
 
 The tests need the PostgreSQL container to be running (`docker compose up -d`).
 
@@ -195,6 +241,7 @@ pushes to `main`:
 jaladb/
 ├── database/
 │   ├── migrations/   # versioned schema changes (SQL)
+│   ├── functions/    # PL/pgSQL functions, one per file (repeatable)
 │   ├── seeds/        # sample data (SQL)
 │   ├── scripts/      # migration and seed runner (TypeScript)
 │   └── tests/        # PostgreSQL integration tests (Vitest)

@@ -64,13 +64,38 @@ export async function createInventory(
   return { productId, warehouseId };
 }
 
-export async function createOrder(client: Client): Promise<{ orderId: Id; customerId: Id }> {
-  const customerId = await createCustomer(client);
+export interface OrderOptions {
+  customerId?: Id;
+  status?: string;
+  totalAmount?: string;
+  createdAt?: string;
+}
+
+export async function createOrder(
+  client: Client,
+  { customerId, status = 'pending', totalAmount = '0.00', createdAt }: OrderOptions = {},
+): Promise<{ orderId: Id; customerId: Id }> {
+  const owner = customerId ?? (await createCustomer(client));
   const warehouseId = await createWarehouse(client);
   const orderId = await insertReturningId(
     client,
-    'INSERT INTO orders (customer_id, warehouse_id) VALUES ($1, $2) RETURNING order_id AS id',
-    [customerId, warehouseId],
+    `INSERT INTO orders (customer_id, warehouse_id, status, total_amount, created_at)
+     VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz, now()))
+     RETURNING order_id AS id`,
+    [owner, warehouseId, status, totalAmount, createdAt ?? null],
   );
-  return { orderId, customerId };
+  return { orderId, customerId: owner };
+}
+
+/** Adds a line for a new product to an order. */
+export async function addOrderItem(
+  client: Client,
+  orderId: Id,
+  { quantity, unitPrice = '1.00' }: { quantity: number; unitPrice?: string },
+): Promise<void> {
+  const productId = await createProduct(client, { price: unitPrice });
+  await client.query(
+    'INSERT INTO order_items (order_id, product_id, quantity, unit_price) VALUES ($1, $2, $3, $4)',
+    [orderId, productId, quantity, unitPrice],
+  );
 }
