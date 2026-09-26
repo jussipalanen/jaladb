@@ -53,6 +53,35 @@ Prerequisites: Docker with Compose, Node.js 22 or newer.
 ./dev test-ui    # run the console's component tests
 ```
 
+### Everything in Docker
+
+To run the whole stack in containers, without installing Node.js:
+
+```bash
+./dev up-all     # PostgreSQL, Adminer, migrations, API and console
+./dev seed       # sample data (or: docker compose run --rm migrate seed)
+```
+
+| Service | URL |
+| --- | --- |
+| Demo console | http://localhost:8081 |
+| API | http://localhost:3000/api/health |
+| Adminer | http://localhost:8080 |
+
+`docker compose up -d` (and `./dev up`) still starts only PostgreSQL and
+Adminer, for local development with `./dev api` and `./dev ui`. The API,
+console and migration containers belong to the Compose profile `app`:
+
+- **`migrate`** is a one-shot container. It applies the migrations and exits,
+  and the API only starts after it succeeded.
+- **`api`** and **`migrate`** run the TypeScript sources directly on Node 24
+  (type stripping), with no build step.
+- **`console`** is the production build served by nginx, which forwards `/api`
+  to the `api` container.
+- All ports are published on `127.0.0.1` only. The API container and
+  `./dev api` share port 3000, so run `./dev down` before switching between
+  them.
+
 ### The `dev` helper
 
 [`dev`](dev) wraps the common Docker and database tasks. Run `./dev help` for
@@ -61,7 +90,8 @@ the full list.
 | Command                  | Description                                                     |
 | ------------------------ | --------------------------------------------------------------- |
 | `./dev up`               | Start PostgreSQL (`localhost:5432`) and Adminer (`localhost:8080`) |
-| `./dev down`             | Stop the containers (data is kept)                              |
+| `./dev up-all`           | Build and start everything in Docker, incl. API and console     |
+| `./dev down`             | Stop all containers (data is kept)                              |
 | `./dev restart`          | Restart the containers                                          |
 | `./dev ps`               | Show container status                                           |
 | `./dev logs [service]`   | Follow logs of all services, or of `postgres` / `adminer`       |
@@ -664,11 +694,14 @@ pushes to `main`:
 - **API tests**: type check and the API integration tests against their own
   PostgreSQL 18 service container
 - **Frontend**: type check, component tests and a production build
+- **Docker stack**: builds all images, starts the full stack, loads the seed
+  data through the migrate image, and checks the API and the console's `/api`
+  proxy
 - **Tooling checks**: shellcheck for the `dev` script and validation of
   `docker-compose.yml`
 
 [Dependabot](.github/dependabot.yml) checks npm packages (root, `backend/` and `frontend/`),
-GitHub Actions and Docker images weekly, and opens PRs that go through the same CI and review.
+GitHub Actions, and Docker images (Compose and Dockerfiles) weekly, and opens PRs that go through the same CI and review.
 Minor and patch updates are grouped; major updates arrive separately.
 PostgreSQL major versions are excluded, because they need a planned data
 upgrade. Dependabot alerts and security updates are enabled in the repository
@@ -685,12 +718,16 @@ jaladb/
 │   ├── triggers/     # triggers and their functions (repeatable)
 │   ├── seeds/        # sample data (SQL); large/ holds the generator
 │   ├── scripts/      # migration and seed runner (TypeScript)
+│   ├── Dockerfile    # migrate/seed image
 │   └── tests/        # PostgreSQL integration tests (Vitest)
 ├── backend/
 │   ├── src/          # Fastify app, routes, error mapping
+│   ├── Dockerfile
 │   └── tests/        # API integration tests (Vitest)
 ├── frontend/
-│   └── src/          # React demo console (Tailwind CSS)
+│   ├── src/          # React demo console (Tailwind CSS)
+│   ├── Dockerfile    # build + nginx
+│   └── nginx.conf    # serves the console, proxies /api
 ├── docs/               # query optimisation write-ups, EXPLAIN scripts, screenshot
 ├── .github/workflows/  # CI
 ├── dev                 # development helper script
