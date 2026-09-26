@@ -141,6 +141,34 @@ jobs:
       - name: Production build
         run: npm run build
 
+  docker:
+    name: Docker stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build and start the full stack
+        run: docker compose --profile app up -d --build --wait
+
+      - name: Load seed data through the migrate image
+        run: docker compose --profile app run --rm migrate seed
+
+      - name: Check the API and the console (and its /api proxy)
+        run: |
+          curl -fsS http://127.0.0.1:3000/api/health
+          curl -fsS http://127.0.0.1:8081/ > /dev/null
+          curl -fsS http://127.0.0.1:8081/api/customers/1/orders | grep -q '"orderId":14'
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose --profile app logs
+
+      - name: Stop
+        if: always()
+        run: docker compose --profile app down -v
+
   tooling:
     name: Tooling checks
     runs-on: ubuntu-latest
@@ -153,4 +181,6 @@ jobs:
         run: shellcheck --shell=bash dev
 
       - name: Validate docker-compose.yml
-        run: docker compose config --quiet
+        run: |
+          docker compose config --quiet
+          docker compose --profile app config --quiet
