@@ -9,7 +9,10 @@ real database.
 
 It is a database demonstration, not a webshop.
 
-## Status
+_Click a section title to expand it._
+
+<details open>
+<summary><h2>Status</h2></summary>
 
 Current release: **[v0.1.0](https://github.com/jussipalanen/jaladb/releases/tag/v0.1.0)**.
 Changes are listed in [CHANGELOG.md](CHANGELOG.md).
@@ -30,7 +33,10 @@ Done:
 - Node.js API (`backend/`) exposing the database functions over HTTP
 - React demo console (`frontend/`)
 
-## Technology
+</details>
+
+<details>
+<summary><h2>Technology</h2></summary>
 
 - PostgreSQL 18
 - Node.js 22+ and TypeScript (migration/seed tooling, API, tests)
@@ -40,7 +46,10 @@ Done:
 - Vitest
 - Docker Compose, Adminer (web GUI)
 
-## Getting started
+</details>
+
+<details open>
+<summary><h2>Getting started</h2></summary>
 
 Prerequisites: Docker with Compose, Node.js 22 or newer.
 
@@ -141,7 +150,10 @@ preselects PostgreSQL and fills in the server, user and database, so only the
 password from `.env` (`jaladb_local` by default) is needed. `./dev adminer`
 prints both.
 
-## Schema
+</details>
+
+<details>
+<summary><h2>Schema</h2></summary>
 
 ```text
 categories 1 ──< products  1 ──< inventory   >── 1 warehouses
@@ -186,7 +198,10 @@ Design decisions:
   `order_status_history (order_id, changed_at, history_id)` for an order's history,
   and a BRIN index on `orders (created_at)` for date-range reports.
 
-## Database functions
+</details>
+
+<details>
+<summary><h2>Database functions</h2></summary>
 
 Each function lives in its own file in [database/functions/](database/functions/).
 
@@ -367,7 +382,7 @@ SELECT update_order_status(16, 'shipped');     -- 'paid'; stock on hand and rese
 - `delivered` and `cancelled` are final. Any other change (e.g. `delivered →
   pending`) raises **`JD003`** and changes nothing.
 - Setting the current status again is a no-op, so retries are safe.
-- The [status history trigger](#order-status-history) records every change.
+- The status history trigger (see *Triggers*) records every change.
 - **Concurrency:** the order row is locked first, so concurrent changes to one
   order run one after the other. A ship racing a cancel: one wins, the other
   gets `JD003`. Two cancels: stock is released once. Inventory rows are then
@@ -396,7 +411,10 @@ parsing messages:
 `JD` is a project-specific SQLSTATE class, chosen so it can't collide with
 PostgreSQL's own codes.
 
-## Views
+</details>
+
+<details>
+<summary><h2>Views</h2></summary>
 
 ### `product_inventory_summary`
 
@@ -428,7 +446,10 @@ ORDER BY sku;
 
 Source: [product_inventory_summary.sql](database/views/product_inventory_summary.sql)
 
-## Triggers
+</details>
+
+<details>
+<summary><h2>Triggers</h2></summary>
 
 ### Order status history
 
@@ -470,10 +491,13 @@ FROM order_status_history WHERE order_id = 18 ORDER BY changed_at, history_id;
 
 Stock effects of status changes (releasing reservations on cancellation,
 deducting stock on shipping) are deliberately not in a trigger. They live in
-the explicit [`update_order_status()`](#update_order_statusorder_id-bigint-new_status-text)
-function, where they are easier to follow and test.
+the explicit `update_order_status()` function (see *Database functions*),
+where they are easier to follow and test.
 
-## API
+</details>
+
+<details>
+<summary><h2>API</h2></summary>
 
 A thin [Fastify](https://fastify.dev) API in [backend/](backend/). Each
 endpoint validates the request shape, calls **one** PostgreSQL function with
@@ -548,7 +572,10 @@ cover every endpoint's success path, validation errors, each error mapping, a
 failed order leaving no order and no reservations, and that unexpected errors
 don't leak details.
 
-## Demo console
+</details>
+
+<details>
+<summary><h2>Demo console</h2></summary>
 
 A small React console in [frontend/](frontend/) for running the database
 operations without writing `curl` commands. It's a database demonstration, not a
@@ -582,7 +609,10 @@ cover result rendering, error display, request building, and running operations
 against a mocked `fetch`. The real API and database behaviour is covered by the
 backend and database suites.
 
-## Migrations
+</details>
+
+<details>
+<summary><h2>Migrations</h2></summary>
 
 `npm run db:migrate` ([database/scripts/migrations.ts](database/scripts/migrations.ts))
 applies two kinds of SQL files.
@@ -614,7 +644,10 @@ For both kinds:
 - A PostgreSQL advisory lock prevents concurrent migration runs.
 - `npm run db:status` lists applied and pending files.
 
-## Seed data
+</details>
+
+<details>
+<summary><h2>Seed data</h2></summary>
 
 [database/seeds/0001_sample_data.sql](database/seeds/0001_sample_data.sql) loads a
 small deterministic dataset: 6 categories, 24 products, 3 warehouses, 12 customers,
@@ -650,7 +683,10 @@ in the same transaction. It takes about 10 seconds:
 
 Normal development and the default tests only use the small dataset.
 
-## Tests
+</details>
+
+<details>
+<summary><h2>Tests</h2></summary>
 
 `npm test` runs integration tests against real PostgreSQL. No database mocks.
 
@@ -707,7 +743,10 @@ PostgreSQL major versions are excluded, because they need a planned data
 upgrade. Dependabot alerts and security updates are enabled in the repository
 settings.
 
-## Project structure
+</details>
+
+<details>
+<summary><h2>Project structure</h2></summary>
 
 ```text
 jaladb/
@@ -736,3 +775,5 @@ jaladb/
 ├── .env.example
 └── package.json
 ```
+
+</details>

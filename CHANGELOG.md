@@ -29,6 +29,8 @@ Before 1.0.0, minor versions may include breaking changes.
 
 ### Changed
 
+- README sections are collapsible accordions; Status and Getting started are
+  open by default ([#34])
 - `pg` is a runtime dependency of the database tooling (it was listed as a dev
   dependency), so the migrate image installs runtime packages only ([#32])
 
@@ -102,6 +104,7 @@ measured indexes, integration tests and a thin Node.js API.
 [#28]: https://github.com/jussipalanen/jaladb/pull/28
 [#30]: https://github.com/jussipalanen/jaladb/pull/30
 [#32]: https://github.com/jussipalanen/jaladb/pull/32
+[#34]: https://github.com/jussipalanen/jaladb/pull/34
 [#2]: https://github.com/jussipalanen/jaladb/pull/2
 [#4]: https://github.com/jussipalanen/jaladb/pull/4
 [#6]: https://github.com/jussipalanen/jaladb/pull/6
