@@ -31,6 +31,18 @@ updates:
       backend-minor-and-patch:
         update-types: [minor, patch]
 
+  # Demo console (frontend/package.json)
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      frontend-minor-and-patch:
+        update-types: [minor, patch]
+
   # Action versions in .github/workflows/
   - package-ecosystem: github-actions
     directory: /

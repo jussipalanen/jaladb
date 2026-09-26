@@ -16,6 +16,11 @@ Before 1.0.0, minor versions may include breaking changes.
   from stock on hand. Invalid transitions raise the new SQLSTATE `JD003`.
   Order and inventory row locking keep concurrent changes consistent and
   deadlock-free ([#28])
+- Demo console in `frontend/` (React 19, Vite, Tailwind CSS 4, dark-blue
+  theme): run the five database operations through the API and see status,
+  timing, row count and results as tables or values. Errors show the API code,
+  SQLSTATE and message. It never sends SQL. `./dev ui` and `./dev test-ui`, a
+  CI job, and a Dependabot entry for `frontend/` ([#30])
 
 ## [0.1.0] - 2026-09-25
 
@@ -85,6 +90,7 @@ measured indexes, integration tests and a thin Node.js API.
 [0.1.0]: https://github.com/jussipalanen/jaladb/releases/tag/v0.1.0
 
 [#28]: https://github.com/jussipalanen/jaladb/pull/28
+[#30]: https://github.com/jussipalanen/jaladb/pull/30
 [#2]: https://github.com/jussipalanen/jaladb/pull/2
 [#4]: https://github.com/jussipalanen/jaladb/pull/4
 [#6]: https://github.com/jussipalanen/jaladb/pull/6
