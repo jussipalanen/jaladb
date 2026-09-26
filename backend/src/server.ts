@@ -6,8 +6,9 @@ const config = loadConfig();
 const pool = createPool(config.databaseUrl);
 const app = buildApp({ db: pool, logger: { level: config.logLevel } });
 
-// Local development only: listen on the loopback interface.
-await app.listen({ host: '127.0.0.1', port: config.port });
+// Loopback by default; the Docker image sets API_HOST=0.0.0.0 so the port can
+// be published (Compose still binds it to 127.0.0.1 on the host).
+await app.listen({ host: config.host, port: config.port });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, async () => {

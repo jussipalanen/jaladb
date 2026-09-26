@@ -14,6 +14,12 @@ compose() {
   docker compose "$@"
 }
 
+# Includes the "app" profile (migrate, api, console), so commands like down,
+# ps and logs also cover the containers started by ./dev up-all.
+compose_all() {
+  docker compose --profile app "$@"
+}
+
 # Runs a command in a container. Without a terminal on stdin no TTY is
 # allocated, so SQL can be piped in:  ./dev psql < query.sql
 compose_exec() {
@@ -73,11 +79,13 @@ cmd_help() {
 Usage: ./dev <command> [args]
 
 Docker
-  up                 Start PostgreSQL and Adminer and wait until healthy
-  down               Stop the containers (data is kept)
-  restart            Restart the containers
+  up                 Start PostgreSQL and Adminer (for ./dev api and ./dev ui)
+  up-all             Build and start everything in Docker: PostgreSQL, Adminer,
+                     migrations, API (:$(env_value API_PORT 3000)) and console (:$(env_value CONSOLE_PORT 8081))
+  down               Stop all containers (data is kept)
+  restart            Restart the running containers
   ps                 Show container status
-  logs [service]     Follow logs (all services, or postgres / adminer)
+  logs [service]     Follow logs (all, or postgres / adminer / migrate / api / console)
 
 Database
   psql [args]        Open psql in the database container (extra args go to psql)
@@ -89,7 +97,8 @@ Database
   reset [-y]         Delete ALL data, then start, migrate and seed from scratch
 
 API (backend/)
-  api                Start the API in watch mode on http://localhost:$(env_value API_PORT 3000)
+  api                Start the API locally in watch mode on http://localhost:$(env_value API_PORT 3000)
+                     (uses the same port as the api container; run ./dev down first after up-all)
   test-api           Run the API integration tests
 
 Console (frontend/)
@@ -103,6 +112,7 @@ Project
   help               Show this help
 
 Examples
+  ./dev up-all && ./dev seed    # everything in Docker, with sample data
   ./dev setup
   ./dev psql -c 'SELECT * FROM products LIMIT 5'
   ./dev psql < some_query.sql
@@ -116,10 +126,21 @@ cmd_up() {
   echo "Adminer:    $(adminer_url)"
 }
 
-cmd_down()    { compose down; }
-cmd_restart() { compose restart; }
-cmd_ps()      { compose ps "$@"; }
-cmd_logs()    { compose logs -f --tail 100 "$@"; }
+cmd_up_all() {
+  ensure_env
+  compose_all up -d --build --wait
+  echo "Console:    http://localhost:$(env_value CONSOLE_PORT 8081)"
+  echo "API:        http://localhost:$(env_value API_PORT 3000)/api/health"
+  echo "Adminer:    $(adminer_url)"
+  echo "PostgreSQL: localhost:$(env_value POSTGRES_PORT 5432)"
+  echo
+  echo "Migrations are applied. Load sample data with './dev seed'."
+}
+
+cmd_down()    { compose_all down; }
+cmd_restart() { compose_all restart; }
+cmd_ps()      { compose_all ps "$@"; }
+cmd_logs()    { compose_all logs -f --tail 100 "$@"; }
 
 cmd_psql() {
   # Uses the credentials already configured inside the container.
@@ -146,7 +167,7 @@ cmd_reset() {
     echo "Aborted."
     exit 1
   fi
-  compose down -v
+  compose_all down -v
   cmd_up
   cmd_migrate
   cmd_seed
@@ -176,6 +197,9 @@ main() {
   case $command in
     up | down | restart | ps | logs | psql | shell | migrate | status | seed | reset | setup | test | adminer)
       "cmd_$command" "$@"
+      ;;
+    up-all)
+      cmd_up_all "$@"
       ;;
     seed-large)
       cmd_seed_large "$@"

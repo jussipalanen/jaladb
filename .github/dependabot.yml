@@ -54,6 +54,17 @@ updates:
       actions-minor-and-patch:
         update-types: [minor, patch]
 
+  # Base images in the Dockerfiles (node, nginx)
+  - package-ecosystem: docker
+    directories:
+      - /database
+      - /backend
+      - /frontend
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+
   # Images in docker-compose.yml
   - package-ecosystem: docker-compose
     directory: /

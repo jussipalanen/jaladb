@@ -2,6 +2,8 @@ import { fileURLToPath } from 'node:url';
 
 export interface Config {
   databaseUrl: string;
+  /** 127.0.0.1 for local runs; 0.0.0.0 inside a container. */
+  host: string;
   port: number;
   logLevel: string;
 }
@@ -24,6 +26,7 @@ export function loadConfig(): Config {
   }
   return {
     databaseUrl,
+    host: process.env.API_HOST ?? '127.0.0.1',
     port: Number(process.env.API_PORT ?? 3000),
     logLevel: process.env.LOG_LEVEL ?? 'info',
   };

@@ -21,6 +21,16 @@ Before 1.0.0, minor versions may include breaking changes.
   timing, row count and results as tables or values. Errors show the API code,
   SQLSTATE and message. It never sends SQL. `./dev ui` and `./dev test-ui`, a
   CI job, and a Dependabot entry for `frontend/` ([#30])
+- The API and demo console run in Docker Compose (profile `app`): a one-shot
+  `migrate` container, the `api`, and the `console` served by nginx with an
+  `/api` proxy. Start them with `./dev up-all`. Includes health checks, a CI job
+  that builds and smoke-tests the stack, and Dependabot for the Dockerfile base
+  images. The API has a new `API_HOST` setting ([#32])
+
+### Changed
+
+- `pg` is a runtime dependency of the database tooling (it was listed as a dev
+  dependency), so the migrate image installs runtime packages only ([#32])
 
 ## [0.1.0] - 2026-09-25
 
@@ -91,6 +101,7 @@ measured indexes, integration tests and a thin Node.js API.
 
 [#28]: https://github.com/jussipalanen/jaladb/pull/28
 [#30]: https://github.com/jussipalanen/jaladb/pull/30
+[#32]: https://github.com/jussipalanen/jaladb/pull/32
 [#2]: https://github.com/jussipalanen/jaladb/pull/2
 [#4]: https://github.com/jussipalanen/jaladb/pull/4
 [#6]: https://github.com/jussipalanen/jaladb/pull/6
