@@ -3,7 +3,7 @@
 #
 #   docker compose run --rm migrate            # apply pending migrations
 #   docker compose run --rm migrate seed       # load the sample data
-FROM node:24-alpine
+FROM node:26-alpine
 
 WORKDIR /app
 
