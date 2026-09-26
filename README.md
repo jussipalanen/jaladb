@@ -16,7 +16,8 @@ _Click a section title to expand it._
 
 Current release: **[v0.1.0](https://github.com/jussipalanen/jaladb/releases/tag/v0.1.0)**.
 Changes are listed in [CHANGELOG.md](CHANGELOG.md). Contributions:
-[CONTRIBUTING.md](CONTRIBUTING.md) · Security reports: [SECURITY.md](SECURITY.md).
+[CONTRIBUTING.md](CONTRIBUTING.md) · Security reports: [SECURITY.md](SECURITY.md) ·
+License: [MIT](LICENSE).
 
 Done:
 
@@ -773,6 +774,7 @@ jaladb/
 ├── dev                 # development helper script
 ├── docker-compose.yml
 ├── CHANGELOG.md
+├── LICENSE
 ├── CONTRIBUTING.md
 ├── SECURITY.md
 ├── .env.example
