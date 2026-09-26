@@ -41,6 +41,12 @@ ensure_node_modules() {
   fi
 }
 
+ensure_frontend_modules() {
+  if [ ! -d frontend/node_modules ]; then
+    npm --prefix frontend install
+  fi
+}
+
 ensure_backend_modules() {
   ensure_node_modules  # the API tests use the database tooling in the root
   if [ ! -d backend/node_modules ]; then
@@ -86,6 +92,10 @@ API (backend/)
   api                Start the API in watch mode on http://localhost:$(env_value API_PORT 3000)
   test-api           Run the API integration tests
 
+Console (frontend/)
+  ui                 Start the demo console on http://localhost:5173 (needs ./dev api)
+  test-ui            Run the console's component tests
+
 Project
   setup              First-time setup: .env, npm install, start, migrate, seed
   test               Run the database integration tests
@@ -127,6 +137,8 @@ cmd_seed_large() { ensure_node_modules; npm run -s db:seed:large; }
 cmd_test()    { ensure_node_modules; npm test; }
 cmd_api()     { ensure_env; ensure_backend_modules; npm --prefix backend run dev; }
 cmd_test_api() { ensure_backend_modules; npm --prefix backend test; }
+cmd_ui()      { ensure_env; ensure_frontend_modules; npm --prefix frontend run dev; }
+cmd_test_ui() { ensure_frontend_modules; npm --prefix frontend test; }
 
 cmd_reset() {
   if [ "${1:-}" = "-y" ]; then ASSUME_YES=1; fi
@@ -143,12 +155,13 @@ cmd_reset() {
 cmd_setup() {
   ensure_env
   ensure_backend_modules
+  ensure_frontend_modules
   cmd_up
   cmd_migrate
   cmd_seed
   echo
-  echo "Ready. Run './dev test' and './dev test-api' to run the tests,"
-  echo "and './dev api' to start the API."
+  echo "Ready. Run './dev test', './dev test-api' and './dev test-ui' to run the tests."
+  echo "Start the API with './dev api' and the console with './dev ui' (second terminal)."
 }
 
 cmd_adminer() {
@@ -172,6 +185,12 @@ main() {
       ;;
     test-api)
       cmd_test_api "$@"
+      ;;
+    ui)
+      cmd_ui "$@"
+      ;;
+    test-ui)
+      cmd_test_ui "$@"
       ;;
     help | -h | --help)
       cmd_help
