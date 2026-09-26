@@ -10,6 +10,12 @@ Before 1.0.0, minor versions may include breaking changes.
 
 ### Added
 
+- Demo console in `frontend/` (React 19, Vite, Tailwind CSS 4, dark-blue
+  theme): run the five database operations through the API and see status,
+  timing, row count and results as tables or values. Errors show the API code,
+  SQLSTATE and message. It never sends SQL. `./dev ui` and `./dev test-ui`, a
+  CI job, and a Dependabot entry for `frontend/` ([#29])
+
 - This changelog. Package versions now match the released version (`0.1.0`).
 - `update_order_status(order_id, new_status)`: order lifecycle with allowed
   transitions only. Cancelling releases reserved stock, shipping deducts it
@@ -85,6 +91,7 @@ measured indexes, integration tests and a thin Node.js API.
 [0.1.0]: https://github.com/jussipalanen/jaladb/releases/tag/v0.1.0
 
 [#28]: https://github.com/jussipalanen/jaladb/pull/28
+[#29]: https://github.com/jussipalanen/jaladb/issues/29
 [#2]: https://github.com/jussipalanen/jaladb/pull/2
 [#4]: https://github.com/jussipalanen/jaladb/pull/4
 [#6]: https://github.com/jussipalanen/jaladb/pull/6

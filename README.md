@@ -28,14 +28,14 @@ Done:
 - Order status history, recorded by triggers
 - `product_inventory_summary` view
 - Node.js API (`backend/`) exposing the database functions over HTTP
-
-Planned next: an optional React demo console (`frontend/`).
+- React demo console (`frontend/`)
 
 ## Technology
 
 - PostgreSQL 18
 - Node.js 22+ and TypeScript (migration/seed tooling, API, tests)
 - Fastify 5 for the API
+- React 19, Vite and Tailwind CSS 4 for the demo console
 - `pg` driver: plain SQL, no ORM
 - Vitest
 - Docker Compose, Adminer (web GUI)
@@ -48,7 +48,9 @@ Prerequisites: Docker with Compose, Node.js 22 or newer.
 ./dev setup      # create .env, npm install, start containers, migrate, seed
 ./dev test       # run the database integration tests
 ./dev api        # start the API on http://localhost:3000
+./dev ui         # start the demo console on http://localhost:5173 (second terminal)
 ./dev test-api   # run the API integration tests
+./dev test-ui    # run the console's component tests
 ```
 
 ### The `dev` helper
@@ -74,6 +76,8 @@ the full list.
 | `./dev adminer`          | Print the Adminer login URL and password                        |
 | `./dev api`              | Start the API in watch mode on `http://localhost:3000`          |
 | `./dev test-api`         | Run the API integration tests                                   |
+| `./dev ui`               | Start the demo console on `http://localhost:5173`               |
+| `./dev test-ui`          | Run the console's component tests                               |
 
 SQL can be passed to `psql` directly or piped in:
 
@@ -514,6 +518,40 @@ cover every endpoint's success path, validation errors, each error mapping, a
 failed order leaving no order and no reservations, and that unexpected errors
 don't leak details.
 
+## Demo console
+
+A small React console in [frontend/](frontend/) for running the database
+operations without writing `curl` commands. It's a database demonstration, not a
+shop.
+
+![JalaDB console showing the best-selling products report](docs/images/console.png)
+
+```bash
+./dev api    # terminal 1: the API
+./dev ui     # terminal 2: http://localhost:5173
+```
+
+1. Pick an operation: customer orders, product availability, reserve stock,
+   create order, or best-selling products.
+2. Adjust the parameters (they default to useful seed data values) and press
+   **Run**.
+3. See the HTTP status, the round-trip time, the number of rows, and the result
+   as a table or as labelled values. Errors show the API error code, the
+   SQLSTATE and the database's message, e.g. `INSUFFICIENT_STOCK · SQLSTATE
+   JD001`.
+
+Each operation shows the SQL the API runs (e.g.
+`SELECT * FROM get_customer_orders($1)`) for explanation only. **The console
+never sends SQL**; it can only call the predefined API endpoints. Vite's dev
+server forwards `/api` to the API, so the browser talks to a single origin and
+no CORS configuration is needed.
+
+Built with React 19, TypeScript, Vite and Tailwind CSS 4, in a dark-blue theme
+that works down to phone width. The component tests (Vitest + Testing Library)
+cover result rendering, error display, request building, and running operations
+against a mocked `fetch`. The real API and database behaviour is covered by the
+backend and database suites.
+
 ## Migrations
 
 `npm run db:migrate` ([database/scripts/migrations.ts](database/scripts/migrations.ts))
@@ -625,10 +663,11 @@ pushes to `main`:
   seed data, and the integration tests
 - **API tests**: type check and the API integration tests against their own
   PostgreSQL 18 service container
+- **Frontend**: type check, component tests and a production build
 - **Tooling checks**: shellcheck for the `dev` script and validation of
   `docker-compose.yml`
 
-[Dependabot](.github/dependabot.yml) checks npm packages (root and `backend/`),
+[Dependabot](.github/dependabot.yml) checks npm packages (root, `backend/` and `frontend/`),
 GitHub Actions and Docker images weekly, and opens PRs that go through the same CI and review.
 Minor and patch updates are grouped; major updates arrive separately.
 PostgreSQL major versions are excluded, because they need a planned data
@@ -650,7 +689,9 @@ jaladb/
 ├── backend/
 │   ├── src/          # Fastify app, routes, error mapping
 │   └── tests/        # API integration tests (Vitest)
-├── docs/               # query optimisation write-ups and EXPLAIN scripts
+├── frontend/
+│   └── src/          # React demo console (Tailwind CSS)
+├── docs/               # query optimisation write-ups, EXPLAIN scripts, screenshot
 ├── .github/workflows/  # CI
 ├── dev                 # development helper script
 ├── docker-compose.yml
