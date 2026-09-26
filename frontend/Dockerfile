@@ -1,7 +1,7 @@
 # JalaDB demo console. Build context: frontend/.
 
 # 1. Type-check and build the static files.
-FROM node:24-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
