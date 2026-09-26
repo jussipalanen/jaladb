@@ -11,6 +11,11 @@ Before 1.0.0, minor versions may include breaking changes.
 ### Added
 
 - This changelog. Package versions now match the released version (`0.1.0`).
+- `update_order_status(order_id, new_status)`: order lifecycle with allowed
+  transitions only. Cancelling releases reserved stock, shipping deducts it
+  from stock on hand. Invalid transitions raise the new SQLSTATE `JD003`.
+  Order and inventory row locking keep concurrent changes consistent and
+  deadlock-free ([#28])
 
 ## [0.1.0] - 2026-09-25
 
@@ -79,6 +84,7 @@ measured indexes, integration tests and a thin Node.js API.
 [Unreleased]: https://github.com/jussipalanen/jaladb/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/jussipalanen/jaladb/releases/tag/v0.1.0
 
+[#28]: https://github.com/jussipalanen/jaladb/pull/28
 [#2]: https://github.com/jussipalanen/jaladb/pull/2
 [#4]: https://github.com/jussipalanen/jaladb/pull/4
 [#6]: https://github.com/jussipalanen/jaladb/pull/6

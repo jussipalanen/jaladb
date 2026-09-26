@@ -22,7 +22,7 @@ Done:
 - Deterministic seed data, plus an optional large generated dataset
 - Integration tests against real PostgreSQL, run in CI
 - `get_customer_orders()`, `get_product_availability()`, `reserve_stock()`,
-  `create_order()`, `get_best_selling_products()`
+  `create_order()`, `update_order_status()`, `get_best_selling_products()`
 - Index optimisations (B-tree, BRIN) with `EXPLAIN ANALYZE` evidence
   ([docs/query-optimization.md](docs/query-optimization.md))
 - Order status history, recorded by triggers
@@ -313,6 +313,39 @@ SELECT * FROM get_best_selling_products('2026-01-01', '2026-06-30', 3);
 
 Source: [get_best_selling_products.sql](database/functions/get_best_selling_products.sql)
 
+### `update_order_status(order_id BIGINT, new_status TEXT)`
+
+Moves an order along its lifecycle and applies the stock effect of each step.
+Returns the previous status.
+
+```sql
+SELECT update_order_status(18, 'cancelled');   -- 'pending'; the 5 notebooks and 1 book are released
+SELECT update_order_status(16, 'shipped');     -- 'paid'; stock on hand and reservation both drop
+```
+
+| From | To | Stock effect |
+| --- | --- | --- |
+| `pending` | `paid` | none (reserved by `create_order`) |
+| `pending` / `paid` | `cancelled` | release the reservation |
+| `paid` | `shipped` | reduce stock on hand and the reservation |
+| `shipped` | `delivered` | none |
+
+- `delivered` and `cancelled` are final. Any other change (e.g. `delivered →
+  pending`) raises **`JD003`** and changes nothing.
+- Setting the current status again is a no-op, so retries are safe.
+- The [status history trigger](#order-status-history) records every change.
+- **Concurrency:** the order row is locked first, so concurrent changes to one
+  order run one after the other. A ship racing a cancel: one wins, the other
+  gets `JD003`. Two cancels: stock is released once. Inventory rows are then
+  locked in `product_id` order, like `create_order()`. With that order reversed,
+  the concurrency tests hit real `40P01` deadlocks between shipments and new
+  orders.
+- The function enforces the rules. A direct `UPDATE orders SET status = ...`
+  still bypasses them, as with any function-based API; the history trigger
+  records such changes all the same.
+
+Source: [update_order_status.sql](database/functions/update_order_status.sql)
+
 ### Error codes
 
 The functions raise specific SQLSTATEs, so the API can map errors without
@@ -324,6 +357,7 @@ parsing messages:
 | `22023` `invalid_parameter_value` | `NULL` argument, non-positive quantity, malformed order items | all functions | 400 |
 | `JD001` | Insufficient stock (message has requested and available quantities) | `reserve_stock`, `create_order` | 409 |
 | `JD002` | Product or warehouse is inactive | `reserve_stock`, `create_order` | 409 |
+| `JD003` | Order status change not allowed (e.g. `delivered → pending`) | `update_order_status` | 409 |
 
 `JD` is a project-specific SQLSTATE class, chosen so it can't collide with
 PostgreSQL's own codes.
@@ -401,8 +435,9 @@ FROM order_status_history WHERE order_id = 18 ORDER BY changed_at, history_id;
   share a timestamp, and `history_id` keeps their order.
 
 Stock effects of status changes (releasing reservations on cancellation,
-deducting stock on shipping) are deliberately not in a trigger. They belong in
-an explicit `update_order_status()` function, planned as a separate issue.
+deducting stock on shipping) are deliberately not in a trigger. They live in
+the explicit [`update_order_status()`](#update_order_statusorder_id-bigint-new_status-text)
+function, where they are easier to follow and test.
 
 ## API
 
@@ -570,6 +605,8 @@ Normal development and the default tests only use the small dataset.
 | [functions/get_product_availability.test.ts](database/tests/functions/get_product_availability.test.ts) | Quantities, only the requested warehouse, zeros when not stocked, fully reserved stock, errors for unknown product/warehouse and `NULL`s |
 | [functions/reserve_stock.test.ts](database/tests/functions/reserve_stock.test.ts) | Reservation and return value, accumulation, reserving all stock, `JD001` with unchanged inventory, not stocked, inactive product/warehouse, invalid arguments |
 | [functions/create_order.test.ts](database/tests/functions/create_order.test.ts) | Order, lines, price snapshot, total = sum of lines, reservations, listed by `get_customer_orders`; failure on the last line or an inactive product leaves nothing behind; unknown references; 14 kinds of invalid input |
+| [functions/update_order_status.test.ts](database/tests/functions/update_order_status.test.ts) | Every allowed transition with its exact stock effect, full lifecycle with history, same-status no-op, all 15 disallowed transitions raise `JD003` and change nothing, invalid arguments, missing inventory row |
+| [functions/update_order_status.concurrency.test.ts](database/tests/functions/update_order_status.concurrency.test.ts) | Ship racing cancel: one wins; double cancel releases stock once; concurrent shipments and new orders on the same products don't deadlock |
 | [functions/create_order.concurrency.test.ts](database/tests/functions/create_order.concurrency.test.ts) | Lines are locked in `product_id` order regardless of input order (checked with a third connection and `lock_timeout`); 20 concurrent orders with reversed product order complete without deadlocks; 8 orders competing for 3 units: exactly 3 complete, the rest leave no partial reservations |
 | [functions/get_best_selling_products.test.ts](database/tests/functions/get_best_selling_products.test.ts) | Totals across orders, purchase-time prices, status filter, date boundaries (first/last day in, day before/after out), single-day range, ordering and tie-breaks, limit, empty result, invalid arguments |
 | [views/product_inventory_summary.test.ts](database/tests/views/product_inventory_summary.test.ts) | Sums over warehouses, product data and category name, zeros for unstocked products, inactive products included, one row per product, reservations visible immediately |
