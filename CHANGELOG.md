@@ -26,6 +26,8 @@ Before 1.0.0, minor versions may include breaking changes.
   `/api` proxy. Start them with `./dev up-all`. Includes health checks, a CI job
   that builds and smoke-tests the stack, and Dependabot for the Dockerfile base
   images. The API has a new `API_HOST` setting ([#32])
+- Repository governance for public visibility: `CODEOWNERS`, `SECURITY.md` and
+  `CONTRIBUTING.md` ([#39])
 
 ### Changed
 
@@ -105,6 +107,7 @@ measured indexes, integration tests and a thin Node.js API.
 [#30]: https://github.com/jussipalanen/jaladb/pull/30
 [#32]: https://github.com/jussipalanen/jaladb/pull/32
 [#34]: https://github.com/jussipalanen/jaladb/pull/34
+[#39]: https://github.com/jussipalanen/jaladb/issues/39
 [#2]: https://github.com/jussipalanen/jaladb/pull/2
 [#4]: https://github.com/jussipalanen/jaladb/pull/4
 [#6]: https://github.com/jussipalanen/jaladb/pull/6
