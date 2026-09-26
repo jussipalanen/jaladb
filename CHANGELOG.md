@@ -15,7 +15,7 @@ Before 1.0.0, minor versions may include breaking changes.
   transitions only. Cancelling releases reserved stock, shipping deducts it
   from stock on hand. Invalid transitions raise the new SQLSTATE `JD003`.
   Order and inventory row locking keep concurrent changes consistent and
-  deadlock-free ([#27])
+  deadlock-free ([#28])
 
 ## [0.1.0] - 2026-09-25
 
@@ -84,7 +84,7 @@ measured indexes, integration tests and a thin Node.js API.
 [Unreleased]: https://github.com/jussipalanen/jaladb/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/jussipalanen/jaladb/releases/tag/v0.1.0
 
-[#27]: https://github.com/jussipalanen/jaladb/issues/27
+[#28]: https://github.com/jussipalanen/jaladb/pull/28
 [#2]: https://github.com/jussipalanen/jaladb/pull/2
 [#4]: https://github.com/jussipalanen/jaladb/pull/4
 [#6]: https://github.com/jussipalanen/jaladb/pull/6
