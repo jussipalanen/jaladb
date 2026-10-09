@@ -23,7 +23,7 @@ services:
   # Web GUI for browsing the database: http://localhost:8080
   # Log in with System "PostgreSQL", Server "postgres" and the credentials from .env.
   adminer:
-    image: adminer:5
+    image: adminer:6
     container_name: jaladb-adminer
     restart: unless-stopped
     depends_on:
